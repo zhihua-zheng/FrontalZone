@@ -14,8 +14,8 @@ const Lz = 140meters   # depth
 const Nh_full = 512 # number of points in each of horizontal directions for full simulation
 const Nz_full = 64  # number of points in the vertical direction for full simulation
 const coarsen_factor = 4
-Nx = Ny = Nh_full / coarsen_factor
-Nz = Nz_full / coarsen_factor
+Nx = Ny = Nh_full ÷ coarsen_factor
+Nz = Nz_full ÷ coarsen_factor
 
 const N₀² = 9e-8 # [s⁻²] mixed layer buoyancy frequency / stratification
 const N₁² = 20*N₀² # [s⁻²] thermocline buoyancy frequency / stratification
@@ -24,6 +24,7 @@ const f = 1e-4 # [s⁻¹] Coriolis frequency
 
 
 ###########-------- GRID SET UP ----------------#############
+@info "Set up grid...."
 const refinement = 1.2 # controls spacing near surface (higher means finer spaced)
 const stretching = 12  # controls rate of stretching at bottom
 
@@ -47,6 +48,7 @@ grid = RectilinearGrid(GPU(),
                        topology = (Periodic, Periodic, Bounded))
 
 ###########-------- TIME-INVARIANT BACKGROUND FIELDS -----------------#############
+@info "Prescribe background fields...."
 parameters = (M2=M², f=f, H=Lz)
 V(x, y, z, t, p) = p.M2 / p.f * (z + p.H)
 B(x, y, z, t, p) = -p.M2 * x
@@ -56,6 +58,7 @@ B_field = BackgroundField(B, parameters=parameters)
 
 
 ###########-------- BOUNDARY CONDITIONS -----------------#############
+@info "Set up boundary conditions...."
 const Q₀ = 10.0   # W m⁻², surface heat flux (positive out of ocean)
 const ρ₀ = 1026.0 # kg m⁻³, average density at the surface of the world ocean
 const cₚ = 3991.0  # J K⁻¹ kg⁻¹, typical heat capacity for seawater
@@ -73,6 +76,7 @@ b_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(B₀),
 
 
 ###########-------- INITIAL CONDITIONS -----------------#############
+@info "Set up initial conditions...."
 const noise = 1e-3
 const hₘ = 60 # [m] initial mixed layer depth
 uᵢ(x, y, z) = noise*randn()
@@ -82,6 +86,7 @@ bᵢ(x, y, z) = N₁²*(z + Lz) + (N₀² - N₁²)*max(z + hₘ, 0)
 
 
 ###########-------- SPONGE LAYER -----------------#############
+@info "Set up bottom sponge layer...."
 # relax to initial states
 const damping_rate = 1/200 # relax fields on a 200 second time-scale
 target_b = LinearTarget{:z}(intercept=N₁²*Lz, gradient=N₁²)
@@ -99,6 +104,7 @@ sponge_forcing = (u=uvw_sponge, v=uvw_sponge, w=uvw_sponge, b=b_sponge)
 
 
 ###########-------- STARTING UP MODEL/ICs ---------------#############
+@info "Define the model...."
 model = NonhydrostaticModel(; grid,
                             coriolis = FPlane(f=f),
                             buoyancy = BuoyancyTracer(),
@@ -114,6 +120,7 @@ set!(model, u=uᵢ, v=vᵢ, w=wᵢ, b=bᵢ)
 
 
 ###########-------- SIMULATION SET UP ---------------#############
+@info "Define the simulation...."
 simulation = Simulation(model, Δt=20minutes, stop_time=20days)
 
 wizard = TimeStepWizard(cfl=0.2, max_change=1.1, max_Δt=20minutes)
@@ -138,7 +145,7 @@ simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterv
 
 
 ###########-------- DIAGNOSTICS --------------#############
-@info "Adding Diagnostics..."
+@info "Add diagnostics..."
 u, v, w = model.velocities
 b = model.tracers.b
 ζ = ∂x(v) - ∂y(u)
