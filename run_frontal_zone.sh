@@ -24,14 +24,20 @@
 module purge
 module load julia
 module load cuda/11.4.0
-module load netcdf/4.8.1
+# module load netcdf/4.8.1
 # module load ncarenv/1.3 gnu/10.1.0 ncarcompilers/0.5.0
 # module load openmpi/4.1.1
 
 export TMPDIR=/glade/scratch/$USER/temp
 mkdir -p $TMPDIR
 
-### file to run
+### Clear previous log file
 proj_dir=$HOME/Projects/TRACE-SEAS/FrontalZone
+LOG=$proj_dir/frontal_zone.log
+if [ -f "$LOG" ]; then
+    rm -f $LOG
+fi
+
+### Run job
 #--project=<...> activates julia environment
 julia --project=$proj_dir frontal_zone.jl

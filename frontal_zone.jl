@@ -48,7 +48,7 @@ grid = RectilinearGrid(GPU(),
                        topology = (Periodic, Periodic, Bounded))
 
 ###########-------- TIME-INVARIANT BACKGROUND FIELDS -----------------#############
-@info "Prescribe background fields...."
+@info "Set up background fields...."
 parameters = (M2=M², f=f, H=Lz)
 V(x, y, z, t, p) = p.M2 / p.f * (z + p.H)
 B(x, y, z, t, p) = -p.M2 * x
@@ -69,8 +69,7 @@ u_bcs = FieldBoundaryConditions(top = GradientBoundaryCondition(0),
                                 bottom = GradientBoundaryCondition(0))
 v_bcs = FieldBoundaryConditions(top = GradientBoundaryCondition(-M²/f),
                                 bottom = GradientBoundaryCondition(-M²/f))
-w_bcs = FieldBoundaryConditions(top = ValueBoundaryCondition(0),
-                                bottom = ValueBoundaryCondition(0))
+w_bcs = FieldBoundaryConditions()
 b_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(B₀),
                                 bottom = GradientBoundaryCondition(N₁²))
 
