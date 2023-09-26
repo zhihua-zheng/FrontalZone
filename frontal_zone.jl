@@ -29,13 +29,13 @@ const refinement = 1.2 # controls spacing near surface (higher means finer space
 const stretching = 12  # controls rate of stretching at bottom
 
 # Normalized height ranging from 0 to 1
-h(k) = (k - 1) / Nz
+@inline h(k) = (k - 1) / Nz
 
 # Linear near-surface generator
-ζ₀(k) = 1 + (h(k) - 1) / refinement
+@inline ζ₀(k) = 1 + (h(k) - 1) / refinement
 
 # Bottom-intensified stretching function
-Σ(k) = (1 - exp(-stretching * h(k))) / (1 - exp(-stretching))
+@inline Σ(k) = (1 - exp(-stretching * h(k))) / (1 - exp(-stretching))
 
 # Generating function
 z_faces(k) = Lz * (ζ₀(k) * Σ(k) - 1)
@@ -50,11 +50,11 @@ grid = RectilinearGrid(GPU(),
 ###########-------- TIME-INVARIANT BACKGROUND FIELDS -----------------#############
 @info "Set up background fields...."
 parameters = (M2=M², f=f, H=Lz)
-V(x, y, z, t, p) = p.M2 / p.f * (z + p.H)
-B(x, y, z, t, p) = -p.M2 * x
+V̅(x, y, z, t, p) = p.M2 / p.f * (z + p.H)
+B̅(x, y, z, t, p) = -p.M2 * x
 
-V_field = BackgroundField(V, parameters=parameters)
-B_field = BackgroundField(B, parameters=parameters)
+V_field = BackgroundField(V̅, parameters=parameters)
+B_field = BackgroundField(B̅, parameters=parameters)
 
 
 ###########-------- BOUNDARY CONDITIONS -----------------#############
