@@ -12,7 +12,7 @@
 ### To the Casper queue
 #PBS -q casper
 ### Log file
-#PBS -o run.log
+#PBS -o Production/run.log
 ### Join output and error streams into single file
 #PBS -j oe
 ### Email
@@ -34,11 +34,11 @@ mkdir -p $TMPDIR
 ### Run job
 proj_dir=$HOME/Projects/TRACE-SEAS/FrontalZone
 #--project=<...> activates julia environment
-julia --project=$proj_dir frontal_zone.jl
+julia --project=$proj_dir ./Prodcution/frontal_zone.jl
 
 ### Overwrite previous log file
-LOG=$proj_dir/frontal_zone.log
+LOG=$proj_dir/Production/frontal_zone.log
 if [ -f "$LOG" ]; then
     rm -f $LOG
 fi
-mv $proj_dir/run.log $LOG
+mv $proj_dir/Production/run.log $LOG

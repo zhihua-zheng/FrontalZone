@@ -120,10 +120,10 @@ set!(model, u=uᵢ, v=vᵢ, w=wᵢ, b=bᵢ)
 
 ###########-------- SIMULATION SET UP ---------------#############
 @info "Define the simulation...."
-simulation = Simulation(model, Δt=20minutes, stop_time=20days)
+simulation = Simulation(model, Δt=20seconds, stop_time=20days, wall_time_limit=10hours)
 
-wizard = TimeStepWizard(cfl=0.2, max_change=1.1, max_Δt=20minutes)
-simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(20))
+wizard = TimeStepWizard(cfl=0.2, diffusive_cfl=0.2, max_change=1.1, max_Δt=5minutes)
+simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(10))
 
 wall_clock = Ref(time_ns())
 
@@ -167,6 +167,7 @@ for side in keys(slicers)
 
     simulation.output_writers[side] = NetCDFOutputWriter(model, fields_slice;
                                                        filename = filename * "_$(side)_slice.nc",
+                                                       dir = "../Data",
                                                        schedule = TimeInterval(save_fields_interval),
                                                        overwrite_existing = true,
                                                        indices)
@@ -174,12 +175,13 @@ end
 
 simulation.output_writers[:meridional] = NetCDFOutputWriter(model, fields_zonnal_mean;
                                                      filename = filename * "_meridional_mean.nc",
+                                                     dir = "../Data",
                                                      schedule = TimeInterval(save_fields_interval),
                                                      overwrite_existing = true)
 
 
 ###########-------- RUN! --------------#############
-run(`nvidia-smi`) # check how much memory you're using on a GPU run
+run(`nvidia-smi`) # check how much memory used on a GPU run
 @info "Run...."
 run!(simulation)
 @info "Simulation completed in " * prettytime(simulation.run_wall_time)
