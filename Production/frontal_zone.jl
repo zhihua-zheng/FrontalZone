@@ -120,7 +120,7 @@ set!(model, u=uᵢ, v=vᵢ, w=wᵢ, b=bᵢ)
 
 ###########-------- SIMULATION SET UP ---------------#############
 @info "Define the simulation...."
-simulation = Simulation(model, Δt=20seconds, stop_time=20days, wall_time_limit=10hours)
+simulation = Simulation(model, Δt=20seconds, stop_time=8days, wall_time_limit=10hours)
 
 wizard = TimeStepWizard(cfl=0.2, diffusive_cfl=0.2, max_change=1.1, max_Δt=5minutes)
 simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(10))
@@ -140,7 +140,7 @@ function print_progress(sim)
     return nothing
 end
 
-simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterval(100))
+simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterval(1000))
 
 
 ###########-------- DIAGNOSTICS --------------#############
@@ -152,11 +152,16 @@ B = Average(b, dims=2)
 U = Average(u, dims=2)
 V = Average(v, dims=2)
 W = Average(w, dims=2)
+b_prof_mean = Average(b, dims=(1,2))
+N²_prof_mean = ∂z(b_prof_mean)
+RiB = N²_prof_mean * f^2 / (M²)^2
+
 fields_slice = Dict("u" => u, "v" => v, "w" => w, "b" => b, "ζ" => ζ)
-fields_zonnal_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W)
+fields_meridional_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W)
+profiles_mean = Dict("RiB" => RiB)
 
 filename = "frontal_zone"
-save_fields_interval = 0.5day
+save_fields_interval = 1hour
 
 slicers = (east = (grid.Nx, :, :),
            south = (:, 1, :),
@@ -173,12 +178,17 @@ for side in keys(slicers)
                                                        indices)
 end
 
-simulation.output_writers[:meridional] = NetCDFOutputWriter(model, fields_zonnal_mean;
+simulation.output_writers[:meridional] = NetCDFOutputWriter(model, fields_meridional_mean;
                                                      filename = filename * "_meridional_mean.nc",
                                                      dir = "../Data",
                                                      schedule = TimeInterval(save_fields_interval),
                                                      overwrite_existing = true)
 
+simulation.output_writers[:profile] = NetCDFOutputWriter(model, profiles_mean;
+                                                     filename = filename * "_profiles_mean.nc",
+                                                     dir = "../Data",
+                                                     schedule = TimeInterval(save_fields_interval),
+                                                     overwrite_existing = true)
 
 ###########-------- RUN! --------------#############
 run(`nvidia-smi`) # check how much memory used on a GPU run
