@@ -153,13 +153,16 @@ U = Average(u, dims=2)
 V = Average(v, dims=2)
 W = Average(w, dims=2)
 b_prof_mean = Field(Average(b, dims=(1,2)))
-N²_prof_mean = ∂z(b_prof_mean)
+N²_prof_mean = @at (Center, Center, Face) ∂z(b_prof_mean)
 RiB = N²_prof_mean * f^2 / (M²)^2
-compute!(RiB)
+#compute!(RiB)
+wb_op = @at (Face, Center, Face) w * b
+wb = Average(wb_op, dims=(1,2))
 
 fields_slice = Dict("u" => u, "v" => v, "w" => w, "b" => b, "ζ" => ζ)
 fields_meridional_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W)
-profiles_mean = Dict("RiB" => RiB)
+profiles_mean = Dict("RiB" => RiB, "wb" => wb)
+fields_bak = Dict("V" => model.background_fields.velocities.v, "B" => model.background_fields.tracers.b)
 
 filename = "frontal_zone"
 data_dir = "./Data"
@@ -189,7 +192,13 @@ simulation.output_writers[:meridional] = NetCDFOutputWriter(model, fields_meridi
 simulation.output_writers[:profile] = NetCDFOutputWriter(model, profiles_mean;
                                                      filename = filename * "_profiles_mean.nc",
                                                      dir = data_dir,
-                                                     schedule = TimeInterval(save_fields_interval),
+                                                     schedule = AveragedTimeInterval(save_fields_interval, window=5minutes),
+                                                     overwrite_existing = true)
+
+simulation.output_writers[:background] = NetCDFOutputWriter(model, fields_bak;
+                                                     filename = filename * "_const_bak.nc",
+                                                     dir = data_dir,
+                                                     schedule = SpecifiedTimes(0),
                                                      overwrite_existing = true)
 
 ###########-------- RUN! --------------#############
