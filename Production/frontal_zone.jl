@@ -152,15 +152,17 @@ B = Average(b, dims=2)
 U = Average(u, dims=2)
 V = Average(v, dims=2)
 W = Average(w, dims=2)
-b_prof_mean = Average(b, dims=(1,2))
+b_prof_mean = Field(Average(b, dims=(1,2)))
 N²_prof_mean = ∂z(b_prof_mean)
 RiB = N²_prof_mean * f^2 / (M²)^2
+compute!(RiB)
 
 fields_slice = Dict("u" => u, "v" => v, "w" => w, "b" => b, "ζ" => ζ)
 fields_meridional_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W)
 profiles_mean = Dict("RiB" => RiB)
 
 filename = "frontal_zone"
+data_dir = "./Data"
 save_fields_interval = 1hour
 
 slicers = (east = (grid.Nx, :, :),
@@ -172,7 +174,7 @@ for side in keys(slicers)
 
     simulation.output_writers[side] = NetCDFOutputWriter(model, fields_slice;
                                                        filename = filename * "_$(side)_slice.nc",
-                                                       dir = "../Data",
+                                                       dir = data_dir,
                                                        schedule = TimeInterval(save_fields_interval),
                                                        overwrite_existing = true,
                                                        indices)
@@ -180,13 +182,13 @@ end
 
 simulation.output_writers[:meridional] = NetCDFOutputWriter(model, fields_meridional_mean;
                                                      filename = filename * "_meridional_mean.nc",
-                                                     dir = "../Data",
+                                                     dir = data_dir,
                                                      schedule = TimeInterval(save_fields_interval),
                                                      overwrite_existing = true)
 
 simulation.output_writers[:profile] = NetCDFOutputWriter(model, profiles_mean;
                                                      filename = filename * "_profiles_mean.nc",
-                                                     dir = "../Data",
+                                                     dir = data_dir,
                                                      schedule = TimeInterval(save_fields_interval),
                                                      overwrite_existing = true)
 

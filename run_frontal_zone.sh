@@ -34,7 +34,7 @@ mkdir -p $TMPDIR
 ### Run job
 proj_dir=$HOME/Projects/TRACE-SEAS/FrontalZone
 #--project=<...> activates julia environment
-julia --project=$proj_dir ./Prodcution/frontal_zone.jl
+julia --project=$proj_dir ./Production/frontal_zone.jl
 
 ### Overwrite previous log file
 LOG=$proj_dir/Production/frontal_zone.log
