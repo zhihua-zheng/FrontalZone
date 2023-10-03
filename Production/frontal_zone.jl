@@ -1,6 +1,8 @@
 ### Setup dependencies
 using Pkg; Pkg.instantiate()
 
+import NCDatasets as NCD
+
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.TurbulenceClosures
@@ -104,6 +106,8 @@ sponge_forcing = (u=uvw_sponge, v=uvw_sponge, w=uvw_sponge, b=b_sponge)
 
 ###########-------- STARTING UP MODEL/ICs ---------------#############
 @info "Define the model...."
+const ν₀=1.0e-6 # molecular viscosity
+const κ₀=1.5e-7 # molecular diffusivity
 model = NonhydrostaticModel(; grid,
                             coriolis = FPlane(f=f),
                             buoyancy = BuoyancyTracer(),
@@ -113,14 +117,14 @@ model = NonhydrostaticModel(; grid,
                             background_fields = (v=V_field, b=B_field),
                             advection = WENO(),
                             timestepper = :RungeKutta3,
-                            closure = SmagorinskyLilly())
+                            closure = (ScalarDiffusivity(ν=ν₀, κ=κ₀), SmagorinskyLilly()))
 
 set!(model, u=uᵢ, v=vᵢ, w=wᵢ, b=bᵢ)
 
 
 ###########-------- SIMULATION SET UP ---------------#############
 @info "Define the simulation...."
-simulation = Simulation(model, Δt=20seconds, stop_time=8days, wall_time_limit=10hours)
+simulation = Simulation(model, Δt=20seconds, stop_time=4days, wall_time_limit=10hours)
 
 wizard = TimeStepWizard(cfl=0.2, diffusive_cfl=0.2, max_change=1.1, max_Δt=5minutes)
 simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(10))
@@ -152,17 +156,38 @@ B = Average(b, dims=2)
 U = Average(u, dims=2)
 V = Average(v, dims=2)
 W = Average(w, dims=2)
+
 b_prof_mean = Field(Average(b, dims=(1,2)))
-N²_prof_mean = @at (Center, Center, Face) ∂z(b_prof_mean)
+dbdz_bcs = FieldBoundaryConditions(grid, (Nothing, Nothing, Face);
+                                   top = OpenBoundaryCondition(-B₀/κ₀),
+                                   bottom = OpenBoundaryCondition(N₁²))
+dbdz_prof_mean = Field(∂z(b_prof_mean), boundary_conditions=dbdz_bcs)
+N²_prof_mean_op = @at (Nothing, Nothing, Center) dbdz_prof_mean
+N²_prof_mean = Field(N²_prof_mean_op)
 RiB = N²_prof_mean * f^2 / (M²)^2
-#compute!(RiB)
-wb_op = @at (Face, Center, Face) w * b
+
+wb_op = @at (Center, Center, Center) w * b
 wb = Average(wb_op, dims=(1,2))
 
+function write_to_ds(dsname, varname, data; mode="c", coords=("xC", "yC", "zC"), dtype=Float64)
+    NCD.NCDataset(dsname, mode) do ds
+        NCD.defVar(ds, varname, data, coords)
+    end
+end
+
+function save_bak(dsname)
+    Vbak = Field(model.background_fields.velocities.v + v*0)
+    Bbak = Field(model.background_fields.tracers.b + b*0)
+    compute!(Vbak)
+    compute!(Bbak)
+    write_to_ds(dsname, "V", interior(Vbak), mode="c", coords=("xC", "yF", "zC"))
+    write_to_ds(dsname, "B", interior(Bbak), mode="a", coords=("xC", "yC", "zC"))
+end
+
+global_attributes = Dict("viscosity_mol" => ν₀, "diffusivity_mol" => κ₀)
 fields_slice = Dict("u" => u, "v" => v, "w" => w, "b" => b, "ζ" => ζ)
 fields_meridional_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W)
 profiles_mean = Dict("RiB" => RiB, "wb" => wb)
-fields_bak = Dict("V" => model.background_fields.velocities.v, "B" => model.background_fields.tracers.b)
 
 filename = "frontal_zone"
 data_dir = "./Data"
@@ -179,6 +204,7 @@ for side in keys(slicers)
                                                        filename = filename * "_$(side)_slice.nc",
                                                        dir = data_dir,
                                                        schedule = TimeInterval(save_fields_interval),
+                                                       global_attributes = global_attributes,
                                                        overwrite_existing = true,
                                                        indices)
 end
@@ -187,19 +213,18 @@ simulation.output_writers[:meridional] = NetCDFOutputWriter(model, fields_meridi
                                                      filename = filename * "_meridional_mean.nc",
                                                      dir = data_dir,
                                                      schedule = TimeInterval(save_fields_interval),
+                                                     global_attributes = global_attributes,
                                                      overwrite_existing = true)
 
 simulation.output_writers[:profile] = NetCDFOutputWriter(model, profiles_mean;
                                                      filename = filename * "_profiles_mean.nc",
                                                      dir = data_dir,
                                                      schedule = AveragedTimeInterval(save_fields_interval, window=5minutes),
+                                                     global_attributes = global_attributes,
                                                      overwrite_existing = true)
 
-simulation.output_writers[:background] = NetCDFOutputWriter(model, fields_bak;
-                                                     filename = filename * "_const_bak.nc",
-                                                     dir = data_dir,
-                                                     schedule = SpecifiedTimes(0),
-                                                     overwrite_existing = true)
+save_bak(data_dir * "/" * filename * "_bak.nc")
+
 
 ###########-------- RUN! --------------#############
 run(`nvidia-smi`) # check how much memory used on a GPU run
