@@ -15,7 +15,7 @@ const Lz = 140meters   # depth
 
 const Nh_full = 512 # number of points in each of horizontal directions for full simulation
 const Nz_full = 64  # number of points in the vertical direction for full simulation
-const coarsen_factor = 4
+const coarsen_factor = 2
 Nx = Ny = Nh_full ÷ coarsen_factor
 Nz = Nz_full ÷ coarsen_factor
 
@@ -61,12 +61,12 @@ B_field = BackgroundField(B̅, parameters=parameters)
 
 ###########-------- BOUNDARY CONDITIONS -----------------#############
 @info "Set up boundary conditions...."
-const Q₀ = 10.0   # W m⁻², surface heat flux (positive out of ocean)
-const ρ₀ = 1026.0 # kg m⁻³, average density at the surface of the world ocean
-const cₚ = 3991.0  # J K⁻¹ kg⁻¹, typical heat capacity for seawater
-const g = 9.81 # m s⁻², gravitational acceleration
-const αᵀ = 2e-4 # K⁻¹, thermal expansion coefficient
-B₀ = g*αᵀ*Q₀ / (ρ₀*cₚ) # m² s⁻³, surface buoyancy flux
+const Q₀ = 0.0   # [W m⁻²], surface heat flux (positive out of ocean)
+const ρ₀ = 1026.0 # [kg m⁻³], average density at the surface of the world ocean
+const cₚ = 3991.0  # [J K⁻¹ kg⁻¹], typical heat capacity for seawater
+const g = 9.81 # [m s⁻²], gravitational acceleration
+const αᵀ = 2e-4 # [K⁻¹], thermal expansion coefficient
+B₀ = g*αᵀ*Q₀ / (ρ₀*cₚ) # [m² s⁻³], surface buoyancy flux
 u_bcs = FieldBoundaryConditions(top = GradientBoundaryCondition(0),
                                 bottom = GradientBoundaryCondition(0))
 v_bcs = FieldBoundaryConditions(top = GradientBoundaryCondition(-M²/f),
@@ -106,8 +106,8 @@ sponge_forcing = (u=uvw_sponge, v=uvw_sponge, w=uvw_sponge, b=b_sponge)
 
 ###########-------- STARTING UP MODEL/ICs ---------------#############
 @info "Define the model...."
-const ν₀=1.0e-6 # molecular viscosity
-const κ₀=1.5e-7 # molecular diffusivity
+const ν₀ = 1.0e-6 # [m² s⁻¹] molecular viscosity
+const κ₀ = 1.5e-7 # [m² s⁻¹] molecular diffusivity
 model = NonhydrostaticModel(; grid,
                             coriolis = FPlane(f=f),
                             buoyancy = BuoyancyTracer(),
@@ -124,7 +124,7 @@ set!(model, u=uᵢ, v=vᵢ, w=wᵢ, b=bᵢ)
 
 ###########-------- SIMULATION SET UP ---------------#############
 @info "Define the simulation...."
-simulation = Simulation(model, Δt=20seconds, stop_time=4days, wall_time_limit=10hours)
+simulation = Simulation(model, Δt=10seconds, stop_time=8days, wall_time_limit=10hours)
 
 wizard = TimeStepWizard(cfl=0.2, diffusive_cfl=0.2, max_change=1.1, max_Δt=5minutes)
 simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(10))
@@ -189,7 +189,7 @@ fields_slice = Dict("u" => u, "v" => v, "w" => w, "b" => b, "ζ" => ζ)
 fields_meridional_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W)
 profiles_mean = Dict("RiB" => RiB, "wb" => wb)
 
-filename = "frontal_zone"
+filename = "r2Q0"
 data_dir = "./Data"
 save_fields_interval = 1hour
 
