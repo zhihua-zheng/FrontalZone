@@ -11,7 +11,7 @@ using Oceananigans.BuoyancyModels: g_Earth
 using Printf
 
 ###########-------- SIMULATION PARAMETERS ----------------#############
-casename = "r11-Q010-W000-D00-St0"
+casename = "r11-Q000-W022-D00-St0"
 use_Stokes = false
 save_checkpoint = false
 
@@ -73,9 +73,9 @@ B_field = BackgroundField(B̅, parameters=parameters)
 
 ###########-------- BOUNDARY CONDITIONS -----------------#############
 @info "Set up boundary conditions...."
-const τ₀ = 0.0 # [N m⁻²], surface wind stress
+const τ₀ = 0.022 # [N m⁻²], surface wind stress
 const θ₀ = 0.0 # [degree], surface wind direction, relative to x-axis, positive counter-clockwise
-const Q₀ = 10.0 # [W m⁻²], surface heat flux (positive out of ocean)
+const Q₀ = 0.0 # [W m⁻²], surface heat flux (positive out of ocean)
 const ρ₀ = 1026.0 # [kg m⁻³], average density at the surface of the world ocean
 const cₚ = 3991.0 # [J K⁻¹ kg⁻¹], typical heat capacity for seawater
 const αᵀ = 2e-4 # [K⁻¹], thermal expansion coefficient

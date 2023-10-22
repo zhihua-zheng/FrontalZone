@@ -1,12 +1,12 @@
 #!/bin/bash -l
 ### Job Name
-#PBS -N run_frontal_zone
+#PBS -N run_eady_mwe
 ### Project Code Allocation
 #PBS -A UMCP0020
 ### Resources
-#PBS -l select=1:ncpus=1:ngpus=1:mem=8GB
+#PBS -l select=1:ncpus=1:ngpus=1:mem=4GB
 ### Run Time
-#PBS -l walltime=10:00:00
+#PBS -l walltime=2:00:00
 ### Type of GPU
 #PBS -l gpu_type=v100
 ### To the Casper queue
@@ -34,10 +34,10 @@ mkdir -p $TMPDIR
 ### Run job
 proj_dir=$HOME/Projects/TRACE-SEAS/FrontalZone
 #--project=<...> activates julia environment
-julia --project=$proj_dir ./Production/frontal_zone.jl
+julia --project=$proj_dir ./Production/eady_mwe.jl
 
 ### Overwrite previous log file
-LOG=$proj_dir/Production/frontal_zone.log
+LOG=$proj_dir/Production/eady_mwe.log
 if [ -f "$LOG" ]; then
     rm -f $LOG
 fi
