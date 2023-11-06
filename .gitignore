@@ -1,4 +1,5 @@
 .vscode/
+.DS_Store
 .CondaPkg/
 .ipynb_checkpoints/
 *.png
@@ -7,3 +8,5 @@
 *.nc
 *.log
 /Figures
+/Data
+*/__pycache__
