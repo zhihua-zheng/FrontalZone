@@ -21,12 +21,8 @@
 #PBS -m abe
 
 ### Clear and load all the modules needed
-module purge
-module load julia
-module load cuda/11.4.0
-# module load netcdf/4.8.1
-# module load ncarenv/1.3 gnu/10.1.0 ncarcompilers/0.5.0
-# module load openmpi/4.1.1
+module --force purge
+module load ncarenv 
 
 export TMPDIR=/glade/scratch/$USER/temp
 mkdir -p $TMPDIR
