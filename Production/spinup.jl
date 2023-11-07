@@ -1,18 +1,19 @@
 ### Setup dependencies
 #using Pkg; Pkg.instantiate()
 
-import NCDatasets as NCD
+#import NCDatasets as NCD
 
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Operators
 using Oceananigans.TurbulenceClosures
 using Oceananigans.BuoyancyModels: g_Earth
+#using Oceanostics.FlowDiagnostics: ErtelPotentialVorticity
 using Random, Printf
 
 ###########-------- SIMULATION PARAMETERS ----------------#############
 casename = "spinup"
-save_checkpoint = true
+save_checkpoint = true 
 
 # `noVflux_total` decides if the simulation applies no flux top BC for total velocity in unforced conditions
 # If `noVflux_total = false`, no flux top BC is applied for perturbation velocity, 
@@ -167,105 +168,33 @@ const cfl_large = 0.85
 simulation = Simulation(model, Δt=Δt₀, stop_time=8.5days, wall_time_limit=12hours)
 
 wizard = TimeStepWizard(cfl=cfl_large, diffusive_cfl=cfl_large, min_change = 0.05, max_change=1.5, max_Δt=5minutes)
-simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(1))
+simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(2))
 
 wall_clock = Ref(time_ns())
 
 function print_progress(sim)
-    #sim.model.clock.time > 2days && (wizard.max_Δt = 2.5minutes)
-    #wizard.cfl = cfl(model.clock.time)
     u, v, w = model.velocities
     progress = 100 * (time(sim) / sim.stop_time)
     elapsed = (time_ns() - wall_clock[]) / 1e9
 
-    @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, max(u): (%.1e, %.1e, %.1e) m/s, CFL: %.1e, next Δt: %s\n",
+    @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, max(u): (%.1e, %.1e, %.1e) m/s, next Δt: %s\n",
             progress, iteration(sim), prettytime(sim), prettytime(elapsed),
-            maximum(abs, u), maximum(abs, v), maximum(abs, w), AdvectiveCFL(sim.Δt)(sim.model), prettytime(sim.Δt))
+            maximum(abs, u), maximum(abs, v), maximum(abs, w), prettytime(sim.Δt))
 
     wall_clock[] = time_ns()
     return nothing
 end
 
-simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterval(1000))
+simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterval(500))
 
 
 ###########-------- DIAGNOSTICS --------------#############
 @info "Add diagnostics..."
-u, v, w = model.velocities
-b = model.tracers.b
-ζ = ∂x(v) - ∂y(u)
-B = Field(Average(b, dims=2))
-U = Field(Average(u, dims=2))
-V = Field(Average(v, dims=2))
-W = Field(Average(w, dims=2))
-
-#b_hrzt_mean = Field(Average(b, dims=(1,2)))
-#dbdz_bcs = FieldBoundaryConditions(grid, (Nothing, Nothing, Face);
-#                                   top = OpenBoundaryCondition(-B₀/κ₀),
-#                                   bottom = OpenBoundaryCondition(N₁²))
-#dbdz_hrzt_mean = Field(∂z(b_hrzt_mean), boundary_conditions=dbdz_bcs)
-#N²_hrzt_mean_op = @at (Nothing, Nothing, Center) dbdz_hrzt_mean
-#N²_hrzt_mean = Field(N²_hrzt_mean_op)
-#RiB = N²_hrzt_mean * f^2 / (M²)^2
-
-∂b∂z_bcs = FieldBoundaryConditions(grid, (Center, Center, Face);
-                                   top = OpenBoundaryCondition(-B₀/κ₀),
-                                   bottom = OpenBoundaryCondition(N₁²))
-N² = Field(∂z(b), boundary_conditions=∂b∂z_bcs)
-N²m = Field(Average(N², dims=(1,2)))
-RiB = N²m * f^2 / (M²)^2
-
-wb_op = @at (Center, Center, Center) w * b
-wb = Average(wb_op, dims=(2,))
-
-u_hrzt_mean = Field(Average(u, dims=(1,2)))
-v_hrzt_mean = Field(Average(v, dims=(1,2)))
-w_hrzt_mean = Field(Average(w, dims=(1,2)))
-#w′ = w - w_hrzt_mean
-#b′ = b - b_hrzt_mean
-#w′b′_op = @at (Center, Center, Center) w′ * b′
-#w′b′ = Average(w′b′_op, dims=(2νₑ = @at (Center, Nothing, Face) model.diffusivity_fields[2].νₑ
-
-νₑc = sum(TurbulenceClosures.viscosity(model.closure, model.diffusivity_fields))
-κₑc = sum(TurbulenceClosures.diffusivity(model.closure, model.diffusivity_fields, Val(:b)))
-νₑ = @at (Center, Center, Face) νₑc
-κₑ = @at (Center, Center, Face) κₑc
-
-#dvdz = Average(∂z(v), dims=(1,2))
-
-@inline ψ′²(i, j, k, grid, ψ, ψ̄) = @inbounds (ψ[i, j, k] - ψ̄[i, j, k])^2
-@inline kinetic_energy_ccc(i, j, k, grid, u, v, w, U, V, W) = (ℑxᶜᵃᵃ(i, j, k, grid, ψ′², u, U) +
-                                                               ℑyᵃᶜᵃ(i, j, k, grid, ψ′², v, V) +
-                                                               ℑzᵃᵃᶜ(i, j, k, grid, ψ′², w, W)) / 2
-
-KE_op = KernelFunctionOperation{Center, Center, Center}(kinetic_energy_ccc,
-                                                        grid, u, v, w, u_hrzt_mean, v_hrzt_mean, w_hrzt_mean)
-KE = Average(KE_op, dims=(1,2,3))
-
-adv_cfl(model) = AdvectiveCFL(simulation.Δt)(model) 
-dif_cfl(model) = DiffusiveCFL(simulation.Δt)(model)
-
-#function write_to_ds(dsname, varname, data; mode="c", coords=("xC", "yC", "zC"), dtype=Float64)
-#    NCD.NCDataset(dsname, mode) do ds
-#        NCD.defVar(ds, varname, data, coords)
-#    end
-#end
-
-#function save_bak(dsname)
-#    Vbak = Field(model.background_fields.velocities.v + v*0)
-#    Bbak = Field(model.background_fields.tracers.b + b*0)
-#    compute!(Vbak)
-#    compute!(Bbak)
-#    write_to_ds(dsname, "V", interior(Vbak), mode="c", coords=("xC", "yF", "zC"))
-#    write_to_ds(dsname, "B", interior(Bbak), mode="a", coords=("xC", "yC", "zC"))
-#end
+include("diagnostics.jl")
+fields_slice, fields_mean = get_output_tuple(model)
 
 global_attributes = Dict("viscosity_mol" => ν₀, "diffusivity_mol" => κ₀, "M²" => M², "f" => f)
-fields_slice = Dict("u" => u, "v" => v, "w" => w, "b" => b, "ζ" => ζ, "νₑ" => νₑ, "κₑ" => κₑ)
-meridional_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W, "wb" => wb)
-horizontal_mean = Dict("RiB" => RiB)#, "dvdz" => dvdz)
-volume_mean = Dict("KE" => KE, "adv_cfl" => adv_cfl, "dif_cfl" => dif_cfl)
-dims = Dict("adv_cfl" => (), "dif_cfl" => ())
+#dims = Dict("adv_cfl" => (), "dif_cfl" => ())
 
 data_dir = "/glade/work/zhihuaz/Data/FrontalZone"
 save_fields_interval = 1hour
@@ -285,13 +214,13 @@ for side in keys(slicers)
                                                        indices)
 end
 
-simulation.output_writers[:averages] = NetCDFOutputWriter(model, merge(meridional_mean, horizontal_mean, volume_mean);
-                                                     filename = casename * "_averages.nc",
-                                                     dir = data_dir,
-                                                     schedule = TimeInterval(save_fields_interval), 
-                                                     global_attributes = global_attributes,
-                                                     overwrite_existing = true,
-                                                     dimensions = dims)
+simulation.output_writers[:averages] = NetCDFOutputWriter(model, fields_mean;
+                                                        filename = casename * "_averages.nc",
+                                                        dir = data_dir,
+                                                        schedule = TimeInterval(save_fields_interval), 
+                                                        global_attributes = global_attributes,
+                                                        #dimensions = dims,
+                                                        overwrite_existing = true)
 
 #save_bak(data_dir * "/bak.nc")
 
