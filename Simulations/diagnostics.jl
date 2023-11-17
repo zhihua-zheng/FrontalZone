@@ -2,6 +2,7 @@ using Oceananigans
 using Oceananigans.Operators
 using Oceananigans.Advection: div_Uc
 using Oceananigans.TurbulenceClosures: ∇_dot_qᶜ, diffusivity, viscosity 
+using Oceananigans.Models.NonhydrostaticModels: tracer_tendency
 using Oceananigans.Utils: SumOfArrays
 
 @inline ψ′²(i, j, k, grid, ψ, ψ̄) = @inbounds (ψ[i, j, k] - ψ̄[i, j, k])^2
@@ -9,11 +10,11 @@ using Oceananigans.Utils: SumOfArrays
                                                                ℑyᵃᶜᵃ(i, j, k, grid, ψ′², v, V) +
                                                                ℑzᵃᵃᶜ(i, j, k, grid, ψ′², w, W)) / 2
 
-function get_output_tuple(model)
+function get_output_tuple(model; extra_outputs=true)
     grid = model.grid
     advection = model.advection
 
-    u, v, w = model.velocities
+    u, v, w = velocities = model.velocities
     b = model.tracers.b
     ζ = Field(∂x(v) - ∂y(u))
 
@@ -22,34 +23,25 @@ function get_output_tuple(model)
     U  = Field(Average(u, dims=2))
     V  = Field(Average(v, dims=2))
     W  = Field(Average(w, dims=2))
+    pHSA = Field(Average(model.pressures.pHY′, dims=2))
+    pNHS = Field(Average(model.pressures.pNHS, dims=2))
     wb = @at (Center, Center, Center) Field(w * b)
     wbym = Field(Average(wb, dims=2))
+    ww = @at (Center, Center, Center) Field(w * w)
+    w2ym = Field(Average(ww, dims=2))
+    www = @at (Center, Center, Center) Field(ww * w)
+    w3ym = Field(Average(www, dims=2))
 
-    # Bulk N² budget (see Thomas & Ferrari 2008, Eq. 3)
-    # note the background advection of background buoyancy is exactly zero
-    hrzt_velocities = (u = SumOfArrays{2}(u, model.background_fields.velocities.u),
-                       v = SumOfArrays{2}(v, model.background_fields.velocities.v),
-                       w = ZFaceField(grid))
-    vert_velocities = (u = XFaceField(grid),
-                       v = YFaceField(grid),
-                       w = SumOfArrays{2}(w, model.background_fields.velocities.w))
-    bt = Field(b + model.background_fields.tracers.b)
-    badH = KernelFunctionOperation{Center, Center, Center}(div_Uc, grid, advection, hrzt_velocities, bt)
-    badV = KernelFunctionOperation{Center, Center, Center}(div_Uc, grid, advection, vert_velocities, bt)
-    bdia = KernelFunctionOperation{Center, Center, Center}(∇_dot_qᶜ, grid, model.closure, model.diffusivity_fields, Val(1), b,
-                                                           model.clock, fields(model), model.buoyancy)
-    BadH = Field(Average(badH, dims=(1,2)))
-    BadV = Field(Average(badV, dims=(1,2)))
-    Bdia = Field(Average(bdia, dims=(1,2)))
-    
     # Equivalence of volume averaged PV through divergence theorem
     # If use Integral, we have to wrap the vorticity and buoyancy into fields first
     vt  = Field(v + model.background_fields.velocities.v)
+    bt  = Field(b + model.background_fields.tracers.b)
     btf = @at (Face, Face, Face) bt
-    ωaᶻ = @at (Face, Face, Face) Field(f + ζ)
+    ωaᶻ = @at (Face, Face, Face) Field(pm.f + ζ)
     ωaˣ = @at (Face, Face, Face) Field(∂y(w) - ∂z(vt))
     PVfz = Field(Average(ωaᶻ*btf, dims=(1,2)))
-    PVfx = Field(Average(ωaˣ*btf, dims=(2,3)))
+    #PVfx = Field(Average(ωaˣ*btf, dims=(2,3)))
+    AVx = Field(Average(ωaˣ, dims=(2,3)))
     #pv = ErtelPotentialVorticity(model; location=(Face, Face, Face), add_background=true)
     #PV = Field(Average(pv, dims=2))
     #wpv_op = @at (Face, Face, Face) w * pv
@@ -60,8 +52,8 @@ function get_output_tuple(model)
     # Horizontal average of stratification 
     b_hrzt_mean = Field(Average(B, dims=1))
     ∂b∂z_bcs = FieldBoundaryConditions(grid, (Nothing, Nothing, Face);
-                                       top    = OpenBoundaryCondition(-B₀/κ₀),
-                                       bottom = OpenBoundaryCondition(N₁²))
+                                       top    = OpenBoundaryCondition(-pm.B₀/pm.κ₀),
+                                       bottom = OpenBoundaryCondition(pm.N₁²))
     ∂b∂z_hrzt_mean = Field(∂z(b_hrzt_mean), boundary_conditions=∂b∂z_bcs)
     N²hm = Field(@at (Nothing, Nothing, Center) ∂b∂z_hrzt_mean)
    
@@ -71,7 +63,7 @@ function get_output_tuple(model)
     w_hrzt_mean = Field(Average(W, dims=1))
     tke_op = KernelFunctionOperation{Center, Center, Center}(kinetic_energy_ccc,
                                                              grid, u, v, w, u_hrzt_mean, v_hrzt_mean, w_hrzt_mean)
-    TKE = Field(Average(tke_op, dims=(1,2,3)))
+    TKE = Field(Average(tke_op, dims=(1,2)))
 
     # Diffusivity & viscosity
     νₑc = sum(viscosity(model.closure, model.diffusivity_fields))
@@ -81,11 +73,33 @@ function get_output_tuple(model)
 
     # Assemble outputs
     fields_slice = Dict("u" => u, "v" => v, "w" => w, "b" => b, "ζ" => ζ, "νₑ" => νₑ, "κₑ" => κₑ)
-    line_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W, "wbym" => wbym)
-    slice_mean = Dict("N²hm" => N²hm, "PVfz" => PVfz, "PVfx" => PVfx, "BadH" => BadH, "BadV" => BadV, "Bdia" => Bdia)#,
-    volume_mean = Dict("TKE" => TKE)#,
-    fields_mean = merge(line_mean, slice_mean, volume_mean)
-    return fields_slice, fields_mean 
+    line_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W, "wbym" => wbym, 
+                     "pHSA" => pHSA, "pNHS" => pNHS, "w2ym" => w2ym, "w3ym" => w3ym)
+    slice_mean = Dict("N²hm" => N²hm, "TKE" => TKE, "PVfz" => PVfz, "AVx" => AVx) #"PVfx" => PVfx, 
+    fields_mean = merge(line_mean, slice_mean)
+
+    if extra_outputs
+        # Bulk N² budget (see Thomas & Ferrari 2008, Eq. 3)
+        # note the background advection of background buoyancy is exactly zero
+        total_velocities = (u = SumOfArrays{2}(u, model.background_fields.velocities.u),
+                            v = SumOfArrays{2}(v, model.background_fields.velocities.v),
+                            w = SumOfArrays{2}(w, model.background_fields.velocities.w))
+        badv = -KernelFunctionOperation{Center, Center, Center}(div_Uc, grid, advection, total_velocities, b)
+        badb = -KernelFunctionOperation{Center, Center, Center}(div_Uc, grid, advection, velocities, model.background_fields.tracers.b)
+        bdia = -KernelFunctionOperation{Center, Center, Center}(∇_dot_qᶜ, grid, model.closure, model.diffusivity_fields, Val(1), b,
+                                                                model.clock, fields(model), model.buoyancy)
+        ∂ₜb = KernelFunctionOperation{Center, Center, Center}(tracer_tendency, grid, Val(1), Val(:b), advection, model.closure,
+                                                              b.boundary_conditions.immersed, model.buoyancy, model.biogeochemistry,
+                                                              model.background_fields, velocities, model.tracers, model.auxiliary_fields,
+                                                              model.diffusivity_fields, model.forcing.b, model.clock)
+        Badv = Field(Average(badv, dims=(1,2)))
+        Badb = Field(Average(badb, dims=(1,2)))
+        Bdia = Field(Average(bdia, dims=(1,2)))
+        ∂ₜB  = Field(Average(∂ₜb,  dims=(1,2)))
+        fields_mean_extra = Dict("Badv" => Badv, "Badb" => Badb, "Bdia" => Bdia, "∂ₜB" => ∂ₜB)
+        fields_mean = merge(fields_mean, fields_mean_extra)
+    end
+    return fields_slice, fields_mean
 end
 
 #adv_cfl(model) = AdvectiveCFL(simulation.Δt)(model)

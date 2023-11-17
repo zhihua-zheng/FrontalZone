@@ -1,24 +1,18 @@
 ### Setup dependencies
 #using Pkg; Pkg.instantiate()
 
-import NCDatasets as NCD
+#import NCDatasets as NCD
 
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Operators
 using Oceananigans.TurbulenceClosures
 using Oceananigans.BuoyancyModels: g_Earth
-using Printf
+using Random, Printf
 
 ###########-------- SIMULATION PARAMETERS ----------------#############
-casename = "r11-Q010-W000-D00-St0"
-use_Stokes = false
+casename = "spinup_no_Vbak"
 save_checkpoint = false
-
-# `noVflux_total` decides if the simulation applies no flux top BC for total velocity in unforced conditions
-# If `noVflux_total = false`, no flux top BC is applied for perturbation velocity,
-# implying a stress to maitain the background flow against dissipation.
-noVflux_total = false
 
 const Lx = 1kilometers # east-west extent
 const Ly = 1kilometers # north-south extent
@@ -63,43 +57,27 @@ grid = RectilinearGrid(GPU(),
 
 ###########-------- TIME-INVARIANT BACKGROUND FIELDS -----------------#############
 @info "Set up background fields...."
-parameters = (M2=M², f=f, H=Lz)
-V̅(x, y, z, t, p) = -p.M2 / p.f * (z + p.H)
-B̅(x, y, z, t, p) = -p.M2 * x
+@inline B̅(x, y, z, t) = -M² * x
 
-V_field = BackgroundField(V̅, parameters=parameters)
-B_field = BackgroundField(B̅, parameters=parameters)
+B_field = BackgroundField(B̅)
 
 
 ###########-------- BOUNDARY CONDITIONS -----------------#############
 @info "Set up boundary conditions...."
-const τ₀ = 0.0 # [N m⁻²], surface wind stress
-const θ₀ = 0.0 # [degree], surface wind direction, relative to x-axis, positive counter-clockwise
-const Q₀ = 10.0 # [W m⁻²], surface heat flux (positive out of ocean)
+const Q₀ = 0.0   # [W m⁻²], surface heat flux (positive out of ocean)
 const ρ₀ = 1026.0 # [kg m⁻³], average density at the surface of the world ocean
-const cₚ = 3991.0 # [J K⁻¹ kg⁻¹], typical heat capacity for seawater
+const cₚ = 3991.0  # [J K⁻¹ kg⁻¹], typical heat capacity for seawater
 const αᵀ = 2e-4 # [K⁻¹], thermal expansion coefficient
 const ν₀ = 1.0e-6 # [m² s⁻¹] molecular viscosity
 const κ₀ = 1.5e-7 # [m² s⁻¹] molecular diffusivity
-#const hᵢ = 60 # [m] initial mixed layer depth
+const hᵢ = 60 # [m] initial mixed layer depth
 
 B₀ = g_Earth*αᵀ*Q₀ / (ρ₀*cₚ) # [m² s⁻³], surface buoyancy flux
-# This sets the surface gradient of along-front perturbation velocity v in unforced conditions
-if noVflux_total
-    ∂v∂z0 = M²/f
-else
-    ∂v∂z0 = 0
-end
-@inline linear_ramp(t, t₀, tᵣ) = min((t - t₀)/tᵣ, 1)
-@inline Fᵘ(x, y, t, p) = -linear_ramp(t, p.t₀, p.tᵣ) * τ₀/ρ₀ * cosd(θ₀)
-@inline Fᵛ(x, y, t, p) = -linear_ramp(t, p.t₀, p.tᵣ) * τ₀/ρ₀ * sind(θ₀) - ν₀*p.∂v∂z0
-mom_flux_params = (t₀=3.5days, # time to introduce wind stress 
-                   tᵣ=1.5days, # length of linear ramp
-                   ∂v∂z0=∂v∂z0)
+const ∂v∂z0 = 0
 
-u_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(Fᵘ, parameters=mom_flux_params),
+u_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(0),
                                 bottom = GradientBoundaryCondition(0))
-v_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(Fᵛ, parameters=mom_flux_params),
+v_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(-ν₀*∂v∂z0),
                                 bottom = GradientBoundaryCondition(∂v∂z0))
 w_bcs = FieldBoundaryConditions()
 b_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(B₀),
@@ -107,12 +85,33 @@ b_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(B₀),
 eddy_νκ_bcs = FieldBoundaryConditions(top = ValueBoundaryCondition(0))
 
 
+###########-------- INITIAL CONDITIONS -----------------#############
+@info "Set up initial conditions...."
+Random.seed!(45)
+const noise = 1e-3
+Ξ(z) = randn() * exp(4z/hᵢ)
+uᵢ(x, y, z) = noise*Ξ(z)
+vᵢ(x, y, z) = noise*Ξ(z)
+wᵢ(x, y, z) = noise*Ξ(z)
+bᵢ(x, y, z) = N₁²*(z + Lz) + (N₀² - N₁²)*max(z + hᵢ, 0)
+
+
 ###########-------- SPONGE LAYER -----------------#############
 @info "Set up bottom sponge layer...."
 # relax to initial states
-const damping_rate = 1/60 #0.527*√N₁² # relax fields on a time-scale comparable to N₁, following Taylor & Ferrari 2010
+const damping_rate = 1/60 #0.527*√N₁² # relax fields on a time-scale comparable to N₁, following Taylor & Ferrari 2010 
 target_b = LinearTarget{:z}(intercept=N₁²*Lz, gradient=N₁²)
 #@inline heaviside(X) = ifelse(X < 0, zero(X), one(X))
+#@inline mask2nd(X) = heaviside(X) * X^2
+#@inline function bottom_mask(x, y, z)
+#    z₁ = -Lz; z₀ = z₁ + 20
+#    return mask2nd((z₀ - z)/(z₀ - z₁))
+#end
+#@inline function bottom_mask(x, y, z)
+#    z₁ = -Lz; z₀ = z₁ + 20; zₘ = (z₀ + z₁)/2
+#    return (viside(z₀ - z) * (1 + tanh(3*(zₘ - z)/(zₘ - z₁)))/2
+#end
+
 #const sponge_z₁ = -Lz
 #const sponge_z₀ = sponge_z₁ + 20
 const sponge_σ = 6
@@ -124,45 +123,21 @@ b_sponge = Relaxation(rate=damping_rate, mask=bottom_mask, target=target_b)
 sponge_forcing = (u=uvw_sponge, v=uvw_sponge, w=uvw_sponge, b=b_sponge)
 
 
-###########-------- STOKES DRIFT FORCING ---------------#############
-@info "Set up Stokes drift forcing...."
-#amplitude  = 0.8 # [m]
-#wavelength = 60  # [m]
-#wavenumber = 2π / wavelength # [m⁻¹]
-#frequency  = sqrt(g_Earth * wavenumber) # [s⁻¹]
-
-# The vertical scale over which the Stokes drift of a monochromatic surface wave
-# decays away from the surface is `1/2wavenumber`, or
-#const vertical_scale = wavelength / 4π
-
-# Stokes drift velocity at the surface
-#const Uˢ = amplitude^2 * wavenumber * frequency # m s⁻¹
-
-if use_Stokes
-    uˢ(z) = Uˢ * exp(z / vertical_scale)
-    ∂z_uˢ(z, t) = 1 / vertical_scale * Uˢ * exp(z / vertical_scale)
-else
-    uˢ(z) = 0
-    ∂z_uˢ(z, t) = 0
-end
-
-
 ###########-------- STARTING UP MODEL/ICs ---------------#############
 @info "Define the model...."
+#vitd = VerticallyImplicitTimeDiscretization()
 model = NonhydrostaticModel(; grid,
                             coriolis = FPlane(f=f),
                             buoyancy = BuoyancyTracer(),
                             tracers = :b,
-                            stokes_drift = UniformStokesDrift(∂z_uˢ=∂z_uˢ),
                             boundary_conditions = (b=b_bcs, u=u_bcs, v=v_bcs, w=w_bcs, νₑ=eddy_νκ_bcs, κₑ=(; b=eddy_νκ_bcs)),
                             forcing = sponge_forcing,
-                            background_fields = (v=V_field, b=B_field),
+                            background_fields = (; b=B_field),
                             advection = WENO(),
                             timestepper = :RungeKutta3,
                             closure = (ScalarDiffusivity(ν=ν₀, κ=κ₀), SmagorinskyLilly()))
 
-ckp_file = "/glade/work/zhihuaz/Restart/FrontalZone/spinup/checkpoint_iteration7872.jld2" 
-set!(model, ckp_file)
+set!(model, u=uᵢ, v=vᵢ, w=wᵢ, b=bᵢ)
 
 
 ###########-------- SIMULATION SET UP ---------------#############
@@ -172,12 +147,13 @@ set!(model, ckp_file)
 Δz = minimum_zspacing(grid, Center(), Center(), Center())
 
 const cfl_large = 0.85
-Δt₀ = cfl_large * min(Δx, Δy, Δz) / abs(V̅(0, 0, 0, 0, parameters))
+Δt₀ = cfl_large * min(Δx, Δy, Δz) / 0.04
 
-simulation = Simulation(model, Δt=Δt₀, stop_time=8.5days, wall_time_limit=12hours)
+Tinertial = 2π/f
+simulation = Simulation(model, Δt=Δt₀, stop_time=12*Tinertial, wall_time_limit=12hours)
 
-wizard = TimeStepWizard(cfl=cfl_large, diffusive_cfl=cfl_large, min_change=0.05, max_change=1.5, max_Δt=5minutes)
-simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(1))
+wizard = TimeStepWizard(cfl=cfl_large, diffusive_cfl=cfl_large, min_change=0.05, max_change=1.5, max_Δt=2minutes)
+simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(2))
 
 wall_clock = Ref(time_ns())
 
@@ -186,70 +162,23 @@ function print_progress(sim)
     progress = 100 * (time(sim) / sim.stop_time)
     elapsed = (time_ns() - wall_clock[]) / 1e9
 
-    @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, max(u): (%6.3e, %6.3e, %6.3e) m/s, next Δt: %s\n",
+    @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, max(u): (%.1e, %.1e, %.1e) m/s, CFL: %.1e, next Δt: %s\n",
             progress, iteration(sim), prettytime(sim), prettytime(elapsed),
-            maximum(abs, u), maximum(abs, v), maximum(abs, w), prettytime(sim.Δt))
+            maximum(abs, u), maximum(abs, v), maximum(abs, w), AdvectiveCFL(sim.Δt)(sim.model), prettytime(sim.Δt))
 
     wall_clock[] = time_ns()
     return nothing
 end
 
-simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterval(1000))
+simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterval(500))
 
 
 ###########-------- DIAGNOSTICS --------------#############
 @info "Add diagnostics..."
-u, v, w = model.velocities
-b = model.tracers.b
-ζ = ∂x(v) - ∂y(u)
-B = Field(Average(b, dims=2))
-U = Field(Average(u, dims=2))
-V = Field(Average(v, dims=2))
-W = Field(Average(w, dims=2))
-
-#b_hrzt_mean = Field(Average(b, dims=(1,2)))
-#dbdz_bcs = FieldBoundaryConditions(grid, (Nothing, Nothing, Face);
-#                                   top = OpenBoundaryCondition(-B₀/κ₀),
-#                                   bottom = OpenBoundaryCondition(N₁²))
-#dbdz_hrzt_mean = Field(∂z(b_hrzt_mean), boundary_conditions=dbdz_bcs)
-#N²_hrzt_mean_op = @at (Nothing, Nothing, Center) dbdz_hrzt_mean
-#N²_hrzt_mean = Field(N²_hrzt_mean_op)
-#RiB = N²_hrzt_mean * f^2 / (M²)^2
-
-∂b∂z_bcs = FieldBoundaryConditions(grid, (Center, Center, Face);
-                                   top = OpenBoundaryCondition(-B₀/κ₀),
-                                   bottom = OpenBoundaryCondition(N₁²))
-N² = Field(∂z(b), boundary_conditions=∂b∂z_bcs)
-N²m = Field(Average(N², dims=(1,2)))
-RiB = N²m * f^2 / (M²)^2
-
-wb_op = @at (Center, Center, Center) w * b
-wb = Average(wb_op, dims=(2,))
-
-u_hrzt_mean = Field(Average(u, dims=(1,2)))
-v_hrzt_mean = Field(Average(v, dims=(1,2)))
-w_hrzt_mean = Field(Average(w, dims=(1,2)))
-
-νₑc = sum(TurbulenceClosures.viscosity(model.closure, model.diffusivity_fields))
-κₑc = sum(TurbulenceClosures.diffusivity(model.closure, model.diffusivity_fields, Val(:b)))
-νₑ = @at (Center, Center, Face) νₑc
-κₑ = @at (Center, Center, Face) κₑc
-
-@inline ψ′²(i, j, k, grid, ψ, ψ̄) = @inbounds (ψ[i, j, k] - ψ̄[i, j, k])^2
-@inline kinetic_energy_ccc(i, j, k, grid, u, v, w, U, V, W) = (ℑxᶜᵃᵃ(i, j, k, grid, ψ′², u, U) +
-                                                               ℑyᵃᶜᵃ(i, j, k, grid, ψ′², v, V) +
-                                                               ℑzᵃᵃᶜ(i, j, k, grid, ψ′², w, W)) / 2
-
-KE_op = KernelFunctionOperation{Center, Center, Center}(kinetic_energy_ccc,
-                                                        grid, u, v, w, u_hrzt_mean, v_hrzt_mean, w_hrzt_mean)
-KE = Average(KE_op, dims=(1,2,3))
+include("diagnostics.jl")
+fields_slice, fields_mean = get_output_tuple(model; extra_outputs=false)
 
 global_attributes = Dict("viscosity_mol" => ν₀, "diffusivity_mol" => κ₀, "M²" => M², "f" => f)
-fields_slice = Dict("u" => u, "v" => v, "w" => w, "b" => b, "ζ" => ζ, "νₑ" => νₑ, "κₑ" => κₑ)
-meridional_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W, "wb" => wb)
-horizontal_mean = Dict("RiB" => RiB)
-volume_mean = Dict("KE" => KE)
-
 data_dir = "/glade/work/zhihuaz/Data/FrontalZone"
 save_fields_interval = 1hour
 
@@ -268,7 +197,7 @@ for side in keys(slicers)
                                                        indices)
 end
 
-simulation.output_writers[:averages] = NetCDFOutputWriter(model, merge(meridional_mean, horizontal_mean, volume_mean);
+simulation.output_writers[:averages] = NetCDFOutputWriter(model, fields_mean;
                                                      filename = casename * "_averages.nc",
                                                      dir = data_dir,
                                                      schedule = TimeInterval(save_fields_interval), 
@@ -276,8 +205,20 @@ simulation.output_writers[:averages] = NetCDFOutputWriter(model, merge(meridiona
                                                      overwrite_existing = true)
 
 
+###########-------- CHECKPOINTER --------------#############
+if save_checkpoint
+    @info "Add checkpointer..."
+    checkp_dir = "/glade/work/zhihuaz/Restart/FrontalZone/" * casename
+    if ~ispath(checkp_dir)
+        mkdir(checkp_dir)
+    end
+    simulation.output_writers[:checkpointer] = Checkpointer(model, schedule=TimeInterval(0.5days), 
+                                                            dir = checkp_dir, prefix = "checkpoint")
+end
+
+
 ###########-------- RUN! --------------#############
 run(`nvidia-smi`) # check how much memory used on a GPU run
 @info "Run...."
-run!(simulation)
+run!(simulation)#, pickup="/glade/work/zhihuaz/Restart/FrontalZone/spinup/checkpoint_iteration17528.jld2")
 @info "Simulation completed in " * prettytime(simulation.run_wall_time)

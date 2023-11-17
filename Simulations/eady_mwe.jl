@@ -60,28 +60,28 @@ const cfl_large = 0.75
 #max(min((t - 50days)/1days - 0.15, cfl_large), cfl_small)
 Δt₀ = cfl_large * min(Δx, Δy, Δz) / V(0, 0, 0, 0, background_state_parameters)
 
-simulation = Simulation(model, Δt = Δt₀, stop_time = 58days)
+simulation = Simulation(model, Δt = Δt₀, stop_time = 51days)
 
 # Adapt the time step while keeping the CFL number fixed.
 wizard = TimeStepWizard(cfl = cfl_large, diffusive_cfl = cfl_large, max_Δt = 3minutes, min_change = 0.1, max_change = 1.5)
 simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(1))
 
-#progress(sim) = @printf("i: % 6d, sim time: % 10s, wall time: % 10s, Δt: % 10s\n",
-#                        sim.model.clock.iteration,
-#                        prettytime(sim.model.clock.time),
-#                        prettytime(sim.run_wall_time),
-#                        prettytime(sim.Δt))
-function progress(sim)
-    sim.model.clock.time > 54days && (wizard.max_Δt = 5minutes)
+progress(sim) = @printf("i: % 6d, sim time: % 10s, wall time: % 10s, Δt: % 10s\n",
+                        sim.model.clock.iteration,
+                        prettytime(sim.model.clock.time),
+                        prettytime(sim.run_wall_time),
+                        prettytime(sim.Δt))
+#function progress(sim)
+    #sim.model.clock.time > 54days && (wizard.max_Δt = 5minutes)
     #wizard.cfl = cfl(model.clock.time)
-    @printf("i: % 6d, sim time: % 10s, wall time: % 10s, Δt: % 10s, advective CFL: %.2e, diffusive CFL: %.2e\n",
-            sim.model.clock.iteration,
-            prettytime(sim.model.clock.time),
-            prettytime(sim.run_wall_time),
-            prettytime(sim.Δt),
-            AdvectiveCFL(sim.Δt)(sim.model),
-            DiffusiveCFL(sim.Δt)(sim.model))
-end
+#    @printf("i: % 6d, sim time: % 10s, wall time: % 10s, Δt: % 10s, advective CFL: %.2e, diffusive CFL: %.2e\n",
+#            sim.model.clock.iteration,
+#            prettytime(sim.model.clock.time),
+#            prettytime(sim.run_wall_time),
+#            prettytime(sim.Δt),
+#            AdvectiveCFL(sim.Δt)(sim.model),
+#            DiffusiveCFL(sim.Δt)(sim.model))
+#end
 simulation.callbacks[:progress] = Callback(progress, IterationInterval(1))
 
 u, v, w = model.velocities
