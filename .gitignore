@@ -9,4 +9,5 @@
 *.log
 /Figures
 /Data
+/Logs
 */__pycache__

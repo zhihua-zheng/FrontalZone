@@ -1,23 +1,13 @@
 #!/bin/bash -l
-### Job Name
-#PBS -N run_frontal_zone
-### Project Code Allocation
 #PBS -A UMCP0020
-### Resources
-#PBS -l select=1:ncpus=1:ngpus=1:mem=8GB
-### Run Time
-#PBS -l walltime=10:00:00
-### Type of GPU
-#PBS -l gpu_type=v100
-### To the Casper queue
-#PBS -q casper
-### Log file
-#PBS -o Production/run.log
-### Join output and error streams into single file
+#PBS -N run_h11_Q000_W022_D000_St1
+#PBS -o Logs/run_h11_Q000_W022_D000_St1.log
 #PBS -j oe
-### Email
+#PBS -l walltime=12:00:00
+#PBS -q casper
+#PBS -l select=1:ncpus=1:ngpus=1:mem=6GB
+#PBS -l gpu_type=v100
 #PBS -M zhihua@umd.edu
-### Send email on abort, begin and end
 #PBS -m abe
 
 ### Clear and load all the modules needed
@@ -27,14 +17,16 @@ module load ncarenv
 export TMPDIR=/glade/scratch/$USER/temp
 mkdir -p $TMPDIR
 
-### Run job
-proj_dir=$HOME/Projects/TRACE-SEAS/FrontalZone
-#--project=<...> activates julia environment
-julia --project=$proj_dir ./Production/frontal_zone.jl
+### Run simulation
+proj_dir=/glade/u/home/zhihuaz/Projects/TRACE-SEAS/FrontalZone
+time julia --check-bounds=no --project=$proj_dir Simulations/frontal_zone.jl "h11_Q000_W022_D000_St1"
+###2>&1 | tee Logs/h11_Q000_W022_D000_St1.out
 
 ### Overwrite previous log file
-LOG=$proj_dir/Production/frontal_zone.log
+LOG=$proj_dir/Logs/h11_Q000_W022_D000_St1.log
 if [ -f "$LOG" ]; then
     rm -f $LOG
 fi
-mv $proj_dir/Production/run.log $LOG
+mv $proj_dir/Logs/run_h11_Q000_W022_D000_St1.log $LOG
+
+qstat -f $PBS_JOBID >> Logs/h11_Q000_W022_D000_St1.log
