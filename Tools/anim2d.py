@@ -96,7 +96,7 @@ def main():
     cbar1.formatter.set_useMathText(True)
     cbar1.ax.yaxis.set_offset_position('left')
     cbar1.ax.set_yticks([-9e-3, -6e-3, -3e-3, 0, 3e-3, 6e-3, 9e-3])
-    ax1.set_title(f't = {(itime*dhr)//24} days, {(itime*dhr)%24} hours')
+    ax1.set_title(f't = {(itime*dhr + hr0)//24} days, {(itime*dhr + hr0)%24} hours')
     ax1.set(aspect=1)
     ax1.axes.get_xaxis().set_visible(False)
     ax1.set_ylabel('Y [m]')
