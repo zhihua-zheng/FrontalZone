@@ -8,7 +8,7 @@ using Oceananigans.Units
 using Oceananigans.Operators
 using Oceananigans.TurbulenceClosures
 using Oceananigans.BuoyancyModels: g_Earth
-using Printf
+using Printf, Random
 
 ###########-------- COMMAND LINE ARGUMENTS ----------------#############
 @info "Parse command line arguments..."
@@ -40,7 +40,6 @@ end
 
 casename = args["casename"]
 outdir   = args["outdir"]
-ckpdir   = replace(outdir, "Data" => "Restart")
 
 
 ###########-------- SIMULATION PARAMETERS ----------------#############
@@ -51,6 +50,7 @@ pm = getproperty(SimParams(), Symbol(groupname))
 pm = enrich_parameters(pm, casename)
 
 stop_time = ifelse(args["nTf"]==nothing, pm.nTf, args["nTf"])*pm.Tf
+ckpdir    = replace(outdir, "Data" => "Restart") * "/" * groupname
 
 
 ###########-------- GRID SET UP ----------------#############
@@ -138,13 +138,14 @@ model = NonhydrostaticModel(; grid,
                             timestepper = :RungeKutta3,
                             closure = (ScalarDiffusivity(ν=pm.ν₀, κ=pm.κ₀), SmagorinskyLilly()))
 
-@info "Set up initial conditions...."
 if pm.pickup_checkpoint
+    @info "Initialize from checkpoint file...."
     #ckp_list = split(read(`ls $ckpdir -1v`, String))
     #irestart = Int64(pm.t₀ / pm.ckp_interval) + 1
     ckp_file = ckpdir * "/" * "checkpoint_iteration7426.jld2"#ckp_list[irestart] 
     set!(model, ckp_file)
 else
+    @info "Initialize from noise...."
     Random.seed!(45)
     Ξ(z) = randn() * exp(4z/pm.hᵢ)
     uᵢ(x, y, z) = pm.noise*Ξ(z)
@@ -160,10 +161,10 @@ end
 Δx = minimum_xspacing(grid, Center(), Center(), Center())
 Δy = minimum_yspacing(grid, Center(), Center(), Center())
 Δz = minimum_zspacing(grid, Center(), Center(), Center())
-Δt₀ = 0.9 * min(Δx, Δy, Δz) / max(pm.Vg, 0.02) 
+Δt₀ = pm.cfl * min(Δx, Δy, Δz) / max(pm.Vg, 0.02)
 simulation = Simulation(model, Δt=Δt₀, stop_time=stop_time, wall_time_limit=12hours)
 
-wizard = TimeStepWizard(cfl=0.9, diffusive_cfl=0.9, min_change=0.05, max_change=1.5, max_Δt=5minutes)
+wizard = TimeStepWizard(cfl=pm.cfl, diffusive_cfl=pm.cfl, min_change=0.05, max_change=1.5, max_Δt=5minutes)
 simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(2))
 
 wall_clock = Ref(time_ns())

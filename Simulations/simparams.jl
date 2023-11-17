@@ -36,11 +36,13 @@ using Parameters
     Front   = (; commons..., M² = 3e-8, # [s⁻²] horizontal buoyancy gradient
                nTf = 12,      # simulation length in unit of inertial period
                t₀  = 3.5days, # when to introduce wind stres
+               cfl = 0.9,     # Courant-Friedrichs–Lewy number
                )
 
     NoFront = (; commons..., M² = 0,
                nTf = 7.2,
                t₀  = 0days,
+               cfl = 0.8,
                )
 end
 
@@ -60,9 +62,9 @@ end
 function enrich_parameters(params, casename)
     coarsen_factor_h, coarsen_factor_z, Q₀, τ₀, θ₀, use_Stokes = decode_casename(casename)
     save_checkpoint   = ifelse((Q₀ + τ₀)==0, true, false)
-    pickup_checkpoint = ifelse(save_checkpoint, false, true)
+    pickup_checkpoint = ifelse(startswith(casename, 'n'), false, !save_checkpoint)
 
-    # boundary gradient for along-front velocity
+    # vertical gradient of along-front velocity at the boundary
     ∂v∂z_uf = ifelse(pm.stress_with_bgV_unforced, pm.M²/pm.f, 0)
     N₁² = 20*params.N₀² # [s⁻²] thermocline buoyancy frequency (stratification)
     Tf  = 2π/params.f   # [s] inertial period 
