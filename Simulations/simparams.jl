@@ -2,12 +2,8 @@ using Parameters
 
 @with_kw struct SimParams
     commons = (;
-               Lx = 1kilometers, # east-west extent
-               Ly = 1kilometers, # north-south extent
-               Lz = 140meters,   # depth
-
-               Nh_full = 512, # number of points in each of horizontal directions for full simulation
-               Nz_full = 64,  # number of points in the vertical direction for full simulation
+               Lz = 140meters, # depth
+               Nz_full = 64,   # number of points in the z direction for full simulation
 
                N₀² = 9e-8,   # [s⁻²] mixed layer buoyancy frequency (stratification)
                f   = 1e-4,   # [s⁻¹] Coriolis frequency
@@ -33,11 +29,28 @@ using Parameters
               )
 
     Front   = (; commons..., M² = 3e-8, # [s⁻²] horizontal buoyancy gradient
+               Lx = 1kilometers, # east-west extent
+               Ly = 1kilometers, # north-south extent
+               Nx_full = 512, # number of points in the x direction for full simulation
+               Ny_full = 512, # number of points in the y direction for full simulation
                nTf = 12,      # simulation length in unit of inertial period
                cfl = 0.9,     # Courant-Friedrichs–Lewy number
                )
 
+    ShortFront = (; commons..., M² = 3e-8,
+               Lx = 1kilometers,
+               Ly = 250meters,
+               Nx_full = 512,
+               Ny_full = 128,
+               nTf = 12,
+               cfl = 0.9,
+               )
+
     NoFront = (; commons..., M² = 0,
+               Lx = 1kilometers,
+               Ly = 1kilometers,
+               Nx_full = 512,
+               Ny_full = 512,
                nTf = 7.2,
                cfl = 0.65,
                )
@@ -69,7 +82,8 @@ function enrich_parameters(params, casename)
     tᵣ  = 2*Tf # [s] length of the linear ramp of wind forcing
     ckp_interval = 1*Tf # [s] how often to checpoint
 
-    Nx = Ny = params.Nh_full ÷ coarsen_factor_h
+    Nx = params.Nx_full ÷ coarsen_factor_h
+    Ny = params.Ny_full ÷ coarsen_factor_h
     Nz = params.Nz_full ÷ coarsen_factor_z
 
     τ₀ˣ   = τ₀ * cosd(θ₀)
@@ -77,7 +91,7 @@ function enrich_parameters(params, casename)
     Cd    = 1.2e-3 # neutral drag coefficient (for U10 <= 11 m s⁻¹) from Large & Pond 1981
     U₁₀   = √(τ₀ / params.ρₐ / Cd) # [m s⁻¹] surface wind speed corresponding to τ₀
     Uˢ    = ifelse(use_Stokes, 0.0155 * U₁₀, 0) # [m s⁻¹] surface Stokes drift velocity
-    Dˢ    = ifelse(use_Stokes, 0.14 * U₁₀^2 / g_Earth, 1e-3) # [m] vertical (e-folding) scale of the Stokes drift (avoid blowing up)
+    Dˢ    = ifelse(use_Stokes, 0.14 * U₁₀^2 / g_Earth, 1) # [m] vertical (e-folding) scale of the Stokes drift (avoid blowing up)
     B₀    = g_Earth * params.αᵀ * Q₀ / (params.ρ₀ * params.cₚ) # [m² s⁻³] surface buoyancy flux
     ustar = √(τ₀ / params.ρ₀) # [m s⁻¹] friction velocity
     wstar = ∛(B₀ * params.hᵢ) # [m s⁻¹] convective velocity

@@ -45,7 +45,8 @@ outdir   = args["outdir"]
 ###########-------- SIMULATION PARAMETERS ----------------#############
 @info "Load in simulation parameters..."
 include("simparams.jl")
-groupname = ifelse(startswith(casename, 'f'), "Front", "NoFront")
+groupname = ifelse(startswith(casename, 'f'), "Front", 
+                   startswith(casename, 's') ? "ShortFront" : "NoFront")
 pm = getproperty(SimParams(), Symbol(groupname))
 pm = enrich_parameters(pm, casename)
 

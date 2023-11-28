@@ -16,10 +16,22 @@ casenames = [#"f11_Q000_W000_D000_St0",
             # "f11_Q000_W022_D225_St0",
             # "f11_Q000_W022_D270_St0",
             # "f11_Q000_W022_D315_St0",
+            
+             # short front
+            # "s11_Q000_W000_D000_St0",
+
+             "s11_Q000_W022_D000_St0",
+             "s11_Q000_W022_D045_St0",
+             "s11_Q000_W022_D090_St0",
+             "s11_Q000_W022_D135_St0",
+             "s11_Q000_W022_D180_St0",
+             "s11_Q000_W022_D225_St0",
+             "s11_Q000_W022_D270_St0",
+             "s11_Q000_W022_D315_St0",
 
              # wind + wave 
             # "n11_Q000_W022_D000_St0",
-             "n11_Q000_W022_D000_St1",
+            # "n11_Q000_W022_D000_St1",
             ]
 
 with open("run_frontal_zone.template", "r") as f:
