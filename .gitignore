@@ -8,7 +8,9 @@
 *.nc
 *.log
 run_frontal_zone.sh
-/Figures
-/Data
-/Logs
+run_eady_mwe.sh
+Simulations/eady_mwe.jl
+Figures/
+Data/
+Logs/
 */__pycache__

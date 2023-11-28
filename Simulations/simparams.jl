@@ -12,16 +12,14 @@ using Parameters
                N₀² = 9e-8,   # [s⁻²] mixed layer buoyancy frequency (stratification)
                f   = 1e-4,   # [s⁻¹] Coriolis frequency
                hᵢ  = 60,     # [m] initial mixed layer depth
-               ρₐ  = 1.3,    # [kg m⁻³] average density of air at the surface
-               ρ₀  = 1026,   # [kg m⁻³] average density of seawater at the surface
-               cₚ  = 3991,   # [J K⁻¹ kg⁻¹] typical heat capacity for seawater
+               ρₐ  = 1.225,  # [kg m⁻³] average density of air at the surface
+               ρ₀  = 1026.0, # [kg m⁻³] average density of seawater at the surface
+               cₚ  = 3991.0, # [J K⁻¹ kg⁻¹] typical heat capacity for seawater
                αᵀ  = 2e-4,   # [K⁻¹], thermal expansion coefficient
                ν₀  = 1.0e-6, # [m² s⁻¹] molecular viscosity
                κ₀  = 1.5e-7, # [m² s⁻¹] molecular diffusivity
 
                noise = 1e-3, # initial noise amplitude
-               tᵣ = 1.5days, # length of the linear ramp of wind forcing
-               ckp_interval = 0.5days, # how often to checpoint
                out_interval = 1hour, # how often to write output
 
                z_refinement = 1.25, # controls spacing near surface (higher means finer spaced)
@@ -31,18 +29,17 @@ using Parameters
  
                # whether use compensating stress for perturbation along-front velocity in unforced conditions with background velocity
                stress_with_bgV_unforced = false,
+               extra_outputs = false,
               )
 
     Front   = (; commons..., M² = 3e-8, # [s⁻²] horizontal buoyancy gradient
                nTf = 12,      # simulation length in unit of inertial period
-               t₀  = 3.5days, # when to introduce wind stres
                cfl = 0.9,     # Courant-Friedrichs–Lewy number
                )
 
     NoFront = (; commons..., M² = 0,
                nTf = 7.2,
-               t₀  = 0days,
-               cfl = 0.8,
+               cfl = 0.65,
                )
 end
 
@@ -68,6 +65,9 @@ function enrich_parameters(params, casename)
     ∂v∂z_uf = ifelse(pm.stress_with_bgV_unforced, pm.M²/pm.f, 0)
     N₁² = 20*params.N₀² # [s⁻²] thermocline buoyancy frequency (stratification)
     Tf  = 2π/params.f   # [s] inertial period 
+    t₀  = ifelse(startswith(casename, 'n'), 0, 5*Tf) # [s] when to introduce wind stres
+    tᵣ  = 2*Tf # [s] length of the linear ramp of wind forcing
+    ckp_interval = 1*Tf # [s] how often to checpoint
 
     Nx = Ny = params.Nh_full ÷ coarsen_factor_h
     Nz = params.Nz_full ÷ coarsen_factor_z
@@ -77,7 +77,7 @@ function enrich_parameters(params, casename)
     Cd    = 1.2e-3 # neutral drag coefficient (for U10 <= 11 m s⁻¹) from Large & Pond 1981
     U₁₀   = √(τ₀ / params.ρₐ / Cd) # [m s⁻¹] surface wind speed corresponding to τ₀
     Uˢ    = ifelse(use_Stokes, 0.0155 * U₁₀, 0) # [m s⁻¹] surface Stokes drift velocity
-    Dˢ    = 0.14 * U₁₀^2 / g_Earth # [m] vertical (e-folding) scale of the Stokes drift
+    Dˢ    = ifelse(use_Stokes, 0.14 * U₁₀^2 / g_Earth, 1e-3) # [m] vertical (e-folding) scale of the Stokes drift (avoid blowing up)
     B₀    = g_Earth * params.αᵀ * Q₀ / (params.ρ₀ * params.cₚ) # [m² s⁻³] surface buoyancy flux
     ustar = √(τ₀ / params.ρ₀) # [m s⁻¹] friction velocity
     wstar = ∛(B₀ * params.hᵢ) # [m s⁻¹] convective velocity
@@ -88,5 +88,6 @@ function enrich_parameters(params, casename)
 
     extra_params = Base.@locals()
     delete!(extra_params, :params)
+    delete!(extra_params, :casename)
     return merge(params, NamedTuple(extra_params))
 end

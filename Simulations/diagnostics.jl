@@ -10,7 +10,7 @@ using Oceananigans.Utils: SumOfArrays
                                                                ℑyᵃᶜᵃ(i, j, k, grid, ψ′², v, V) +
                                                                ℑzᵃᵃᶜ(i, j, k, grid, ψ′², w, W)) / 2
 
-function get_output_tuple(model; extra_outputs=true)
+function get_output_tuple(model; extra_outputs=false)
     grid = model.grid
     advection = model.advection
 
@@ -34,14 +34,19 @@ function get_output_tuple(model; extra_outputs=true)
 
     # Equivalence of volume averaged PV through divergence theorem
     # If use Integral, we have to wrap the vorticity and buoyancy into fields first
-    vt  = Field(v + model.background_fields.velocities.v)
-    bt  = Field(b + model.background_fields.tracers.b)
-    btf = @at (Face, Face, Face) bt
-    ωaᶻ = @at (Face, Face, Face) Field(pm.f + ζ)
-    ωaˣ = @at (Face, Face, Face) Field(∂y(w) - ∂z(vt))
-    PVfz = Field(Average(ωaᶻ*btf, dims=(1,2)))
-    #PVfx = Field(Average(ωaˣ*btf, dims=(2,3)))
-    AVx = Field(Average(ωaˣ, dims=(2,3)))
+    Bbkf = Field{Face, Face, Face}(grid)
+    set!(Bbkf, (x, y, z) -> (-pm.M² * x))
+    bf   = @at (Face, Face, Face) b
+    btf  = Field(bf + Bbkf)
+    v_zf = @at (Center, Face, Face) v
+    v_xf = @at (Face, Face, Center) v
+    u_zf = @at (Face, Center, Face) u
+    w_xf = @at (Face, Center, Face) w
+    ωᶻ   = Field(∂x(v_zf) - ∂y(u_zf))
+    ωˣ   = Field(∂y(w_xf) - ∂z(v_xf))
+    PVfz = Field(Average(ωᶻ*btf, dims=(1,2)))
+    #PVfx = Field(Average(ωˣ*btf, dims=(2,3)))
+    RVx = Field(Average(ωˣ, dims=(2,3)))
     #pv = ErtelPotentialVorticity(model; location=(Face, Face, Face), add_background=true)
     #PV = Field(Average(pv, dims=2))
     #wpv_op = @at (Face, Face, Face) w * pv
@@ -75,7 +80,7 @@ function get_output_tuple(model; extra_outputs=true)
     fields_slice = Dict("u" => u, "v" => v, "w" => w, "b" => b, "ζ" => ζ, "νₑ" => νₑ, "κₑ" => κₑ)
     line_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W, "wbym" => wbym, 
                      "pHSA" => pHSA, "pNHS" => pNHS, "w2ym" => w2ym, "w3ym" => w3ym)
-    slice_mean = Dict("N²hm" => N²hm, "TKE" => TKE, "PVfz" => PVfz, "AVx" => AVx) #"PVfx" => PVfx, 
+    slice_mean = Dict("N²hm" => N²hm, "TKE" => TKE, "PVfz" => PVfz, "RVx" => RVx) #"PVfx" => PVfx,
     fields_mean = merge(line_mean, slice_mean)
 
     if extra_outputs

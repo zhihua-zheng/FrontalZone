@@ -19,7 +19,7 @@ mkdir -p $TMPDIR
 
 ### Run simulation
 proj_dir=/glade/u/home/zhihuaz/Projects/TRACE-SEAS/FrontalZone
-time julia --check-bounds=no --project=$proj_dir Simulations/frontal_zone.jl {1} "{0}"
+time julia --project=$proj_dir Simulations/frontal_zone.jl {1} "{0}"
 ###2>&1 | tee Logs/{0}.out
 
 ### Overwrite previous log file

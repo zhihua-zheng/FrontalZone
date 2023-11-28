@@ -140,9 +140,8 @@ model = NonhydrostaticModel(; grid,
 
 if pm.pickup_checkpoint
     @info "Initialize from checkpoint file...."
-    #ckp_list = split(read(`ls $ckpdir -1v`, String))
-    #irestart = Int64(pm.t₀ / pm.ckp_interval) + 1
-    ckp_file = ckpdir * "/" * "checkpoint_iteration7426.jld2"#ckp_list[irestart] 
+    ckp_list = split(read(`ls $ckpdir -1v`, String))
+    ckp_file = ckpdir * "/" * ckp_list[6] # "checkpoint_iteration7736.jld2"
     set!(model, ckp_file)
 else
     @info "Initialize from noise...."
@@ -188,7 +187,7 @@ simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterv
 ###########-------- DIAGNOSTICS --------------#############
 @info "Add diagnostics..."
 include("diagnostics.jl")
-fields_slice, fields_mean = get_output_tuple(model)
+fields_slice, fields_mean = get_output_tuple(model; extra_outputs=pm.extra_outputs)
 
 global_attributes = Dict("viscosity_mol" => pm.ν₀, "diffusivity_mol" => pm.κ₀, "M²" => pm.M², "f" => pm.f)
 slicers = (east = (grid.Nx, :, :),
