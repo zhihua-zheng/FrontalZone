@@ -88,10 +88,12 @@ B_field = BackgroundField(B̅, parameters=background_params)
 
 ###########-------- BOUNDARY CONDITIONS -----------------#############
 @info "Set up boundary conditions...."
-mom_flux_params = (; pm.t₀, pm.tᵣ, pm.ν₀, pm.∂v∂z_uf, pm.τ₀ˣ, pm.τ₀ʸ, pm.ρ₀)
-@inline linear_ramp(t, p) = min( max( (t - p.t₀)/p.tᵣ, 0 ), 1 )
-@inline Fᵘ(x, y, t, p) = -linear_ramp(t, p) * p.τ₀ˣ/p.ρ₀
-@inline Fᵛ(x, y, t, p) = -linear_ramp(t, p) * p.τ₀ʸ/p.ρ₀ - p.ν₀*p.∂v∂z_uf
+mom_flux_params = (; pm.σ_wind, pm.t₀, pm.tᵣ, pm.ν₀, pm.∂v∂z_uf, pm.τ₀ˣ, pm.τ₀ʸ, pm.ρ₀)
+@inline linear_ramp(t, p) = min(max((t - p.t₀), 0) / p.tᵣ, 1)
+@inline oscillator(t, p) = sin(p.σ_wind * max((t - p.t₀), 0))
+@inline temporal_wind(t, p) = ifelse(p.σ_wind!=0, oscillator(t, p), linear_ramp(t, p))
+@inline Fᵘ(x, y, t, p) = -p.τ₀ˣ/p.ρ₀*temporal_wind(t, p)
+@inline Fᵛ(x, y, t, p) = -p.τ₀ʸ/p.ρ₀*temporal_wind(t, p) - p.ν₀*p.∂v∂z_uf
 
 u_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(Fᵘ, parameters=mom_flux_params),
                                 bottom = GradientBoundaryCondition(0))

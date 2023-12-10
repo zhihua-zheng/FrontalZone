@@ -63,14 +63,23 @@ function decode_casename(casename)
     coarsen_factor_z = parse(Int64, fres[3])
     Q₀ = parse(Float64, lstrip(heat_flux,      'Q'))
     τ₀ = parse(Float64, lstrip(wind_stress,    'W')) / 1e3
-    θ₀ = parse(Float64, lstrip(wind_direction, 'D'))
+    if startswith(wind_direction, 'D')
+        θ₀ = parse(Float64, lstrip(wind_direction, 'D'))
+        wind_oscillation = false
+    elseif startswith(wind_direction, 'O')
+        θ₀ = parse(Float64, lstrip(wind_direction, 'O'))
+        wind_oscillation = true
+    else
+        throw(DomainError(wind_direction, "wind direction identifier is bad"))
+    end
     use_Stokes = parse(Bool, Stokes_flag[end])
-    return coarsen_factor_h, coarsen_factor_z, Q₀, τ₀, θ₀, use_Stokes
+    return coarsen_factor_h, coarsen_factor_z, Q₀, τ₀, θ₀, wind_oscillation, use_Stokes
 end
 
 
 function enrich_parameters(params, casename)
-    coarsen_factor_h, coarsen_factor_z, Q₀, τ₀, θ₀, use_Stokes = decode_casename(casename)
+    coarsen_factor_h, coarsen_factor_z, Q₀, τ₀, θ₀, wind_oscillation, use_Stokes = decode_casename(casename)
+    σ_wind = ifelse(wind_oscillation, params.f, 0)
     save_checkpoint   = ifelse((Q₀ + τ₀)==0, true, false)
     pickup_checkpoint = ifelse(startswith(casename, 'n'), false, !save_checkpoint)
 

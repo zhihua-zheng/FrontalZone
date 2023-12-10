@@ -23,8 +23,6 @@ function get_output_tuple(model; extra_outputs=false)
     U  = Field(Average(u, dims=2))
     V  = Field(Average(v, dims=2))
     W  = Field(Average(w, dims=2))
-    pHSA = Field(Average(model.pressures.pHY′, dims=2))
-    pNHS = Field(Average(model.pressures.pNHS, dims=2))
     wb = @at (Center, Center, Center) Field(w * b)
     wbym = Field(Average(wb, dims=2))
     ww = @at (Center, Center, Center) Field(w * w)
@@ -55,12 +53,12 @@ function get_output_tuple(model; extra_outputs=false)
     #Jz_dia
     
     # Horizontal average of stratification 
-    b_hrzt_mean = Field(Average(B, dims=1))
-    ∂b∂z_bcs = FieldBoundaryConditions(grid, (Nothing, Nothing, Face);
-                                       top    = OpenBoundaryCondition(-pm.B₀/pm.κ₀),
-                                       bottom = OpenBoundaryCondition(pm.N₁²))
-    ∂b∂z_hrzt_mean = Field(∂z(b_hrzt_mean), boundary_conditions=∂b∂z_bcs)
-    N²hm = Field(@at (Nothing, Nothing, Center) ∂b∂z_hrzt_mean)
+    bfhm = Field(Average(bf, dims=(1,2)))
+    #∂b∂z_bcs = FieldBoundaryConditions(grid, (Nothing, Nothing, Face);
+    #                                   top    = OpenBoundaryCondition(-pm.B₀/pm.κ₀),
+    #                                   bottom = OpenBoundaryCondition(pm.N₁²))
+    #∂b∂z_hrzt_mean = Field(∂z(b_hrzt_mean), boundary_conditions=∂b∂z_bcs)
+    #N²hm = Field(@at (Nothing, Nothing, Center) ∂b∂z_hrzt_mean)
    
     # Turbulent Kinetic Energy
     u_hrzt_mean = Field(Average(U, dims=1))
@@ -79,11 +77,14 @@ function get_output_tuple(model; extra_outputs=false)
     # Assemble outputs
     fields_slice = Dict("u" => u, "v" => v, "w" => w, "b" => b, "ζ" => ζ, "νₑ" => νₑ, "κₑ" => κₑ)
     line_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W, "wbym" => wbym, 
-                     "pHSA" => pHSA, "pNHS" => pNHS, "w2ym" => w2ym, "w3ym" => w3ym)
-    slice_mean = Dict("N²hm" => N²hm, "TKE" => TKE, "PVfz" => PVfz, "RVx" => RVx) #"PVfx" => PVfx,
+                     "w2ym" => w2ym, "w3ym" => w3ym)
+    slice_mean = Dict("bfhm" => bfhm, "TKE" => TKE, "PVfz" => PVfz, "RVx" => RVx) #"PVfx" => PVfx,
     fields_mean = merge(line_mean, slice_mean)
 
     if extra_outputs
+        pHSA = Field(Average(model.pressures.pHY′, dims=2))
+        pNHS = Field(Average(model.pressures.pNHS, dims=2))
+
         # Bulk N² budget (see Thomas & Ferrari 2008, Eq. 3)
         # note the background advection of background buoyancy is exactly zero
         total_velocities = (u = SumOfArrays{2}(u, model.background_fields.velocities.u),
@@ -101,7 +102,8 @@ function get_output_tuple(model; extra_outputs=false)
         Badb = Field(Average(badb, dims=(1,2)))
         Bdia = Field(Average(bdia, dims=(1,2)))
         ∂ₜB  = Field(Average(∂ₜb,  dims=(1,2)))
-        fields_mean_extra = Dict("Badv" => Badv, "Badb" => Badb, "Bdia" => Bdia, "∂ₜB" => ∂ₜB)
+
+        fields_mean_extra = Dict("pHSA" => pHSA, "pNHS" => pNHS, "Badv" => Badv, "Badb" => Badb, "Bdia" => Bdia, "∂ₜB" => ∂ₜB)
         fields_mean = merge(fields_mean, fields_mean_extra)
     end
     return fields_slice, fields_mean
