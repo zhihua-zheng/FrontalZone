@@ -49,6 +49,7 @@ def main():
                 # ds_east = ds_east.rename_vars(dict([(i, i+'_east') for i in list(ds_east.keys())]))
                 # ds = xr.merge([ds_top, ds_south, ds_east, dsm])
                 # dt = DataTree.from_dict({'slice/top': ds_top, 'slice/south': ds_south, 'slice/east': ds_east, 'average': dsm})
+
     dst = xr.open_dataset(data_dir+args.cname+'_top_slice.nc').chunk('auto')
     dst.close()
     dss = xr.open_dataset(data_dir+args.cname+'_south_slice.nc').chunk('auto')
@@ -58,7 +59,16 @@ def main():
     # # make the restart time as day 0
     # if args.cname == 'spinup':
     #     ds = ds.assign_coords(time=(ds.time - np.timedelta64(24*3+12,'h')))
-    
+
+    dsa['timeTf'] = dsa.time/np.timedelta64(int(np.around(2*np.pi/dsa.f)), 's')
+    dsa['PVvm_z'] = (dsa.PVfz.isel(zF=-1) - dsa.PVfz.isel(zF=0))/(dsa.zF[-1] - dsa.zF[0])
+    dsa['PVvm_x'] = (dsa.RVx.isel(xF=0) + dsa.attrs['M²']/dsa.f)*(-dsa.attrs['M²'])
+    # dsa['bhm']    = dsa.B.mean('xC')
+    # delb          = (dsa.zC[0] - dsa.zF[0])*1.8e-6
+    # dsa['PVvm_f'] = dsa.f*(dsa.bhm.isel(zC=-1) - dsa.bhm.isel(zC=0) + delb)/(dsa.zF[-1] - dsa.zF[0]) # should use b at zfaces
+    dsa['PVvm_f'] = dsa.f*(dsa.bfhm.isel(zF=-1) - dsa.bfhm.isel(zF=0))/(dsa.zF[-1] - dsa.zF[0])
+    dsa['PVvm']   = dsa.PVvm_z + dsa.PVvm_x + dsa.PVvm_f
+
     # add background fields
     # H = abs(ds_east.zF[0])
     # z_top_slice = ds_top.zC[0]
@@ -77,6 +87,13 @@ def main():
         delayed_obj_t.compute()
         delayed_obj_s.compute()
         delayed_obj_e.compute()
+
+    # Path(data_dir+args.cname+'_averages.nc').unlink()
+    # if Path(fpath_extra).is_file():
+    #     Path(fpath_extra).unlink()
+    # Path(data_dir+args.cname+'_top_slice.nc').unlink()
+    # Path(data_dir+args.cname+'_south_slice.nc').unlink()
+    # Path(data_dir+args.cname+'_east_slice.nc').unlink()
 
 
 if __name__ == "__main__":

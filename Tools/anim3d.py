@@ -61,12 +61,14 @@ def main():
         print('OS not supported.')
 
     # customized colormap
-    colorlist = ['xkcd:navy', 'xkcd:cerulean', 'xkcd:pale grey', 'xkcd:melon', 'xkcd:deep red']
-    nodes = [0.0, 0.75, 0.82, 0.89, 1.0]
+    colorlist = ['xkcd:navy', 'xkcd:cerulean', 'xkcd:sky', 'xkcd:pale grey', 'xkcd:melon', 'xkcd:deep red']
+    nodes = [0.0, 0.65, 0.78, 0.82, 0.86, 1.0]
     cmap = LinearSegmentedColormap.from_list('buoyancy', list(zip(nodes, colorlist)))
 
     # read data
     fpath = data_dir+args.fname
+    with xr.open_dataset(fpath, group='average').load() as ds:
+        timeTf = ds.timeTf
     top = xr.open_dataset(fpath, group='slice/top').load()#.chunk('auto')
     top.close()
     z_top_slice = top.zC[0]
@@ -82,6 +84,16 @@ def main():
     south['bt'] = (-south.attrs['M²'] * south.xC + south.b).squeeze().transpose('xC','zC',...)
     east['bt']  = (-east.attrs['M²']  * east.xC  + east.b).squeeze().transpose('yC','zC',...)
 
+    # surface wind
+    taum = int(args.fname[10:13])/1e3
+    taud = int(args.fname[15:18])
+    if args.fname[14] == 'O':
+        temporal_wind = np.sin(2*np.pi*np.maximum((timeTf - 5), 0))
+    else:
+        temporal_wind = np.minimum(np.maximum((timeTf - 5), 0) / 2, 1)
+    taux = np.cos(taud/180*np.pi)*taum*temporal_wind
+    tauy = np.sin(taud/180*np.pi)*taum*temporal_wind
+
     # time interval and initial timestamp in unit of hours
     dhr = int(((top.time[2] - top.time[1])/np.timedelta64(1,'h')).data)
     hr0 = int((top.time[0]/np.timedelta64(1,'h')).data)
@@ -89,10 +101,10 @@ def main():
     X, Y, Z = np.meshgrid(top.xC, top.yC, east.zC)
 
     # limits and contour values
-    bmin = min([top.bt.min(), east.bt.min(), south.bt.min()])
-    bmax = max([top.bt.max(), east.bt.max(), south.bt.max()])
-    bmin = np.ceil(bmin*1e6)/1e6
-    bmax = np.floor(bmax*1e6)/1e6
+    # bmin = min([top.bt.min(), east.bt.min(), south.bt.min()])
+    # bmax = max([top.bt.max(), east.bt.max(), south.bt.max()])
+    bmin = -2e-5#np.floor(bmin*1e5)/1e5
+    bmax = 1.9e-4#np.ceil(bmax*1e5)/1e5
     blines = np.concatenate([np.arange(0,1.4,0.2), np.arange(1.3,2,0.05)])*1e-4
     xmin, xmax = -500, 500
     ymin, ymax = 0, 1000
@@ -100,10 +112,11 @@ def main():
 
     Ckw = {'vmin': bmin,
            'vmax': bmax,
+           'extend': 'max',
            'levels': np.linspace(bmin, bmax, 256),
            'cmap': cmap
           }
-    Lkw = {'linewidths': 0.8, 
+    Lkw = {'linewidths': 0.3,
        'colors': 'xkcd:almost black'
       }
     edges_kw = {'color': 'xkcd:charcoal', 
@@ -111,7 +124,7 @@ def main():
                 'zorder': 2
                }
     
-    fig = plt.figure(figsize=(6,4.2), constrained_layout=True)
+    fig = plt.figure(figsize=(6,4.5), constrained_layout=True)
     ax = fig.add_subplot(111, projection='3d', computed_zorder=False)
     itime = 0
     xroll = 0
@@ -124,6 +137,8 @@ def main():
     Lt = ax.contour(X[:, :, -1], Y[:, :, -1], top.bt.isel(time=itime).roll(xC=xroll), blines, zdir='z', offset=z_top_slice, **Lkw)
     Ls = ax.contour(X[0, :, :], south.bt.isel(time=itime).roll(xC=xroll), Z[0, :, :], blines, zdir='y', offset=y_south_slice, **Lkw)
     Le = ax.contour(east.bt.isel(time=itime), Y[:, -1, :], Z[:, -1, :], blines, zdir='x', offset=x_east_slice, **Lkw)
+    Aw = ax.quiver(300, 1000, 10, 6e3*taux.isel(time=itime), 6e3*tauy.isel(time=itime), 0, normalize=False, colors='k',
+                   arrow_length_ratio=0.2, lw=3, capstyle='round', joinstyle='round')
 
     ax.plot([xmax, xmax], [ymin, ymax], zmin, **edges_kw)
     ax.plot([xmin, xmax], [ymin, ymin], zmin, **edges_kw)
@@ -144,9 +159,9 @@ def main():
            ylim=[ymin, ymax], 
            zlim=[zmin, zmax])
     ax.tick_params(axis='both', labelsize=8)
-    ax.view_init(20, -70, 0)
-    ax.set_box_aspect((1,1,0.58), zoom=1.17)
-    ax.set_title(f't = {(itime*dhr + hr0)//24} days, {(itime*dhr + hr0)%24} hours', y=0.995);
+    ax.view_init(30, -70, 0)
+    ax.set_box_aspect((1,1,0.55), zoom=1.15)
+    ax.set_title(rf'Time / T$_{{inertial}}$ = {timeTf[itime]:.2f}', y=0.999)
     ax.xaxis.pane.fill = False
     ax.yaxis.pane.fill = False
     ax.zaxis.pane.fill = False
@@ -160,11 +175,14 @@ def main():
     cbar.set_label(r'Buoyancy [m s$^{-2}$]', labelpad=-42, fontsize=10)
     cbar.formatter.set_powerlimits((0, 0))
     cbar.formatter.set_useMathText(True)
-    cbar.ax.yaxis.set_offset_position('left')
+    cbar.ax.get_yaxis().get_offset_text().set_visible(False)
+    exponent_axis = np.floor(np.log10(max(cbar.ax.get_yticks()))).astype(int)
+    cbar.ax.annotate(r'$\times$10$^{%i}$'%(exponent_axis),
+                     xy=(-0.5, 1.06), xycoords='axes fraction')
     cbar.ax.tick_params(labelsize=8) 
 
     def update(frame):
-        nonlocal Ct, Cs, Ce, Lt, Ls, Le
+        nonlocal Ct, Cs, Ce, Lt, Ls, Le, Aw
         # for each frame, get new data and clear old data stored on each artist
         top_field   = top.bt.isel(time=frame).roll(xC=xroll)
         south_field = south.bt.isel(time=frame).roll(xC=xroll)
@@ -174,6 +192,7 @@ def main():
             for obj in (Ct, Cs, Ce, Lt, Ls, Le):
                 for coll in obj.collections:
                     coll.remove()
+        Aw.remove()
         # update the plot
         Ct = ax.contourf(X[:, :, -1], Y[:, :, -1], top_field,   zdir='z', offset=z_top_slice,   **Ckw)
         Cs = ax.contourf(X[0, :, :], south_field,  Z[0, :, :],  zdir='y', offset=y_south_slice, **Ckw)
@@ -181,13 +200,15 @@ def main():
         Lt = ax.contour(X[:, :, -1], Y[:, :, -1], top_field,   blines, zdir='z', offset=z_top_slice,   **Lkw)
         Ls = ax.contour(X[0, :, :],  south_field, Z[0, :, :],  blines, zdir='y', offset=y_south_slice, **Lkw)
         Le = ax.contour(east_field,  Y[:, -1, :], Z[:, -1, :], blines, zdir='x', offset=x_east_slice,  **Lkw)
-        ax.set_title(f't = {(frame*dhr + hr0)//24} days, {(frame*dhr + hr0)%24} hours', y=0.995)
-        return Ct, Cs, Ce, Lt, Ls, Le
+        Aw = ax.quiver(300, 1000, 10, 6e3*taux.isel(time=frame), 6e3*tauy.isel(time=frame), 0, normalize=False, colors='k',
+                   arrow_length_ratio=0.2, lw=3, capstyle='round', joinstyle='round')
+        ax.set_title(rf'Time / T$_{{inertial}}$ = {timeTf[frame]:.2f}', y=0.999)
+        return Ct, Cs, Ce, Lt, Ls, Le, Aw
     
     ani = animation.FuncAnimation(fig=fig, func=update, frames=range(top.dims['time']), 
                                   interval=400, repeat_delay=800)#, blit=True
     # save animation
-    ani.save(figs_dir+args.fname_out, writer='ffmpeg', fps=3, dpi=200)
+    ani.save(figs_dir+args.fname_out, writer='ffmpeg', fps=5, dpi=200)
 
 
 if __name__ == "__main__":
