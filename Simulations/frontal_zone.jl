@@ -51,7 +51,7 @@ pm = getproperty(SimParams(), Symbol(groupname))
 pm = enrich_parameters(pm, casename)
 
 stop_time = ifelse(args["nTf"]==nothing, pm.nTf, args["nTf"])*pm.Tf
-ckpdir    = replace(outdir, "Data" => "Restart") * "/" * groupname
+ckpdir    = replace(outdir, "Data" => "Restart") * "/Front"
 
 
 ###########-------- GRID SET UP ----------------#############
@@ -132,7 +132,7 @@ Stokes_params = (; pm.Uˢ, pm.Dˢ)
 model = NonhydrostaticModel(; grid,
                             coriolis = FPlane(f=pm.f),
                             buoyancy = BuoyancyTracer(),
-                            tracers = :b,
+                            tracers = (:b, :c),
                             stokes_drift = UniformStokesDrift(∂z_uˢ=∂z_uˢ, parameters=Stokes_params),
                             boundary_conditions = (b=b_bcs, u=u_bcs, v=v_bcs, w=w_bcs, νₑ=eddy_νκ_bcs, κₑ=(; b=eddy_νκ_bcs)),
                             forcing = sponge_forcing,
@@ -146,6 +146,9 @@ if pm.pickup_checkpoint
     ckp_list = split(read(`ls $ckpdir -1v`, String))
     ckp_file = ckpdir * "/" * ckp_list[6] # "checkpoint_iteration7736.jld2"
     set!(model, ckp_file)
+    @info "Initialize addtional passive tracer..."
+    cᵢ(x, y, z) = (1 - tanh(50*(z + pm.hᵢ) / pm.hᵢ)) / 2
+    set!(model, c=cᵢ)
 else
     @info "Initialize from noise...."
     Random.seed!(45)
@@ -166,7 +169,7 @@ end
 Δt₀ = pm.cfl * min(Δx, Δy, Δz) / max(pm.Vg, 0.02)
 simulation = Simulation(model, Δt=Δt₀, stop_time=stop_time, wall_time_limit=12hours)
 
-wizard = TimeStepWizard(cfl=pm.cfl, diffusive_cfl=pm.cfl, min_change=0.05, max_change=1.5, max_Δt=5minutes)
+wizard = TimeStepWizard(cfl=pm.cfl, diffusive_cfl=pm.cfl, min_change=0.05, max_change=1.5, max_Δt=pm.max_Δt)
 simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(2))
 
 wall_clock = Ref(time_ns())
@@ -184,7 +187,7 @@ function print_progress(sim)
     return nothing
 end
 
-simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterval(1000))
+simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterval(20))
 
 
 ###########-------- DIAGNOSTICS --------------#############
@@ -193,14 +196,12 @@ include("diagnostics.jl")
 fields_slice, fields_mean = get_output_tuple(model; extra_outputs=pm.extra_outputs)
 
 global_attributes = Dict("viscosity_mol" => pm.ν₀, "diffusivity_mol" => pm.κ₀, "M²" => pm.M², "f" => pm.f)
-slicers = (east = (grid.Nx, :, :),
-           south = (:, 1, :),
-           top = (:, :, grid.Nz-5))
+slicers = pm.full_fields ? (full = (:,:,:),) : (east = (grid.Nx, :, :), south = (:, 1, :), top = (:, :, grid.Nz-5))
 
 for side in keys(slicers)
     indices = slicers[side]
     simulation.output_writers[side] = NetCDFOutputWriter(model, fields_slice;
-                                                       filename = casename * "_$(side)_slice.nc",
+                                                       filename = casename * "_$(side).nc",
                                                        dir = outdir,
                                                        schedule = TimeInterval(pm.out_interval),
                                                        global_attributes = global_attributes,

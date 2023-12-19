@@ -26,6 +26,7 @@ using Parameters
                # whether use compensating stress for perturbation along-front velocity in unforced conditions with background velocity
                stress_with_bgV_unforced = false,
                extra_outputs = false,
+               full_fields = false,
               )
 
     Front   = (; commons..., M² = 3e-8, # [s⁻²] horizontal buoyancy gradient
@@ -33,8 +34,9 @@ using Parameters
                Ly = 1kilometers, # north-south extent
                Nx_full = 512, # number of points in the x direction for full simulation
                Ny_full = 512, # number of points in the y direction for full simulation
-               nTf = 12,      # simulation length in unit of inertial period
+               nTf = 10,      # simulation length in unit of inertial period
                cfl = 0.9,     # Courant-Friedrichs–Lewy number
+               max_Δt = 5minutes, # max time step
                )
 
     ShortFront = (; commons..., M² = 3e-8,
@@ -42,8 +44,9 @@ using Parameters
                Ly = 250meters,
                Nx_full = 512,
                Ny_full = 128,
-               nTf = 12,
+               nTf = 10,
                cfl = 0.9,
+               max_Δt = 5minutes,
                )
 
     NoFront = (; commons..., M² = 0,
@@ -51,8 +54,9 @@ using Parameters
                Ly = 1kilometers,
                Nx_full = 512,
                Ny_full = 512,
-               nTf = 7.2,
+               nTf = 10,
                cfl = 0.65,
+               max_Δt = 2minutes,
                )
 end
 
@@ -80,14 +84,15 @@ end
 function enrich_parameters(params, casename)
     coarsen_factor_h, coarsen_factor_z, Q₀, τ₀, θ₀, wind_oscillation, use_Stokes = decode_casename(casename)
     σ_wind = ifelse(wind_oscillation, params.f, 0)
-    save_checkpoint   = ifelse((Q₀ + τ₀)==0, true, false)
-    pickup_checkpoint = ifelse(startswith(casename, 'n'), false, !save_checkpoint)
+    save_checkpoint   = false #ifelse((Q₀ + τ₀)==0, true, false)
+    pickup_checkpoint = true #ifelse(startswith(casename, 'n'), false, !save_checkpoint)
+    wind_waves = ifelse((τ₀==0) & use_Stokes, false, true)
 
     # vertical gradient of along-front velocity at the boundary
     ∂v∂z_uf = ifelse(pm.stress_with_bgV_unforced, pm.M²/pm.f, 0)
     N₁² = 20*params.N₀² # [s⁻²] thermocline buoyancy frequency (stratification)
     Tf  = 2π/params.f   # [s] inertial period 
-    t₀  = ifelse(startswith(casename, 'n'), 0, 5*Tf) # [s] when to introduce wind stres
+    t₀  = 5*Tf #ifelse(startswith(casename, 'n'), 0, 5*Tf) # [s] when to introduce wind stres
     tᵣ  = 2*Tf # [s] length of the linear ramp of wind forcing
     ckp_interval = 1*Tf # [s] how often to checpoint
 
@@ -97,8 +102,8 @@ function enrich_parameters(params, casename)
 
     τ₀ˣ   = τ₀ * cosd(θ₀)
     τ₀ʸ   = τ₀ * sind(θ₀)
-    Cd    = 1.2e-3 # neutral drag coefficient (for U10 <= 11 m s⁻¹) from Large & Pond 1981
-    U₁₀   = √(τ₀ / params.ρₐ / Cd) # [m s⁻¹] surface wind speed corresponding to τ₀
+    Cd    = 0.85e-3 # neutral drag coefficient, Fig. 9 from Edson et al. 2013
+    U₁₀   = ifelse(wind_waves, √(τ₀ / params.ρₐ / Cd), 5) # [m s⁻¹] surface wind speed used to specify surface waves
     Uˢ    = ifelse(use_Stokes, 0.0155 * U₁₀, 0) # [m s⁻¹] surface Stokes drift velocity
     Dˢ    = ifelse(use_Stokes, 0.14 * U₁₀^2 / g_Earth, 1) # [m] vertical (e-folding) scale of the Stokes drift (avoid blowing up)
     B₀    = g_Earth * params.αᵀ * Q₀ / (params.ρ₀ * params.cₚ) # [m² s⁻³] surface buoyancy flux
