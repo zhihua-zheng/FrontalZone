@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import warnings
 import argparse
 import xarray as xr
 import numpy as np
@@ -38,8 +39,8 @@ def main():
     with xr.open_dataset(data_dir+args.cname+'_averages.nc').chunk('auto') as dsa:
         fpath_extra = data_dir+args.cname+'_averages_extra.nc'
         if Path(fpath_extra).is_file():
-            with xr.open_dataset(fpath_extra).chunk('auto') as ds_extra:
-                 dsa = xr.merge([ds_extra, dsa])
+            with xr.open_dataset(fpath_extra).chunk('auto') as doa_extra:
+                 dsa = xr.merge([doa_extra, dsa])
 
     # with xr.open_dataset(data_dir+args.cname+'_top_slice.nc').chunk('auto') as ds_top:
         # ds_top = ds_top.rename_vars(dict([(i, i+'_top') for i in list(ds_top.keys())]))
@@ -50,23 +51,23 @@ def main():
                 # ds = xr.merge([ds_top, ds_south, ds_east, dsm])
                 # dt = DataTree.from_dict({'slice/top': ds_top, 'slice/south': ds_south, 'slice/east': ds_east, 'average': dsm})
 
-    dst = xr.open_dataset(data_dir+args.cname+'_top_slice.nc').chunk('auto')
+    dst = xr.open_dataset(data_dir+args.cname+'_top.nc').chunk('auto')
     dst.close()
-    dss = xr.open_dataset(data_dir+args.cname+'_south_slice.nc').chunk('auto')
+    dss = xr.open_dataset(data_dir+args.cname+'_south.nc').chunk('auto')
     dss.close()
-    dse = xr.open_dataset(data_dir+args.cname+'_east_slice.nc').chunk('auto')
+    dse = xr.open_dataset(data_dir+args.cname+'_east.nc').chunk('auto')
     dse.close()
     # # make the restart time as day 0
     # if args.cname == 'spinup':
     #     ds = ds.assign_coords(time=(ds.time - np.timedelta64(24*3+12,'h')))
 
+    # bulk PV in original field
+    H = dsa.zC[-1] - dsa.zC[0]
     dsa['timeTf'] = dsa.time/np.timedelta64(int(np.around(2*np.pi/dsa.f)), 's')
-    dsa['PVvm_z'] = (dsa.PVfz.isel(zF=-1) - dsa.PVfz.isel(zF=0))/(dsa.zF[-1] - dsa.zF[0])
+    dsa['bhm']    = dsa.bym.mean('xC').interp(zF=dsa.zC).drop_vars('zF')
+    dsa['PVvm_z'] = (dsa.PVfz.isel(zC=-1) - dsa.PVfz.isel(zC=0))/H
     dsa['PVvm_x'] = (dsa.RVx.isel(xF=0) + dsa.attrs['M²']/dsa.f)*(-dsa.attrs['M²'])
-    # dsa['bhm']    = dsa.B.mean('xC')
-    # delb          = (dsa.zC[0] - dsa.zF[0])*1.8e-6
-    # dsa['PVvm_f'] = dsa.f*(dsa.bhm.isel(zC=-1) - dsa.bhm.isel(zC=0) + delb)/(dsa.zF[-1] - dsa.zF[0]) # should use b at zfaces
-    dsa['PVvm_f'] = dsa.f*(dsa.bfhm.isel(zF=-1) - dsa.bfhm.isel(zF=0))/(dsa.zF[-1] - dsa.zF[0])
+    dsa['PVvm_f'] = dsa.f*(dsa.bhm.isel(zC=-1) - dsa.bhm.isel(zC=0))/H
     dsa['PVvm']   = dsa.PVvm_z + dsa.PVvm_x + dsa.PVvm_f
 
     # add background fields

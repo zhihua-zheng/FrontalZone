@@ -58,7 +58,7 @@ class TWODimensional_spec(object):
         #self.calc_var()
 
         # calculate isotropic spectrum
-        self.ki,self.ispec =  calc_ispec(self.k1,self.k2,self.spec,ndim=self.spec.ndim)
+        self.ki, self.ispec = calc_ispec(self.k1,self.k2,self.spec,ndim=self.spec.ndim)
 
     def calc_freq(self):
         """ calculate array of spectral coordinate (frequency or

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 
 import sys
-import warnings
 import argparse
 import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
+# import matplotlib.animation as animation
 from viztool import FormatScalarFormatter
+# from dask.distributed import LocalCluster, Client
+# from xanimations import Movie
+from streamjoy import stream, wrap_matplotlib
 from matplotlib.colors import LinearSegmentedColormap
 
 ###patch start###
@@ -22,123 +24,152 @@ if not hasattr(Axis, "_get_coord_info_old"):
     Axis._get_coord_info = _get_coord_info_new
 ###patch end###
 
-def main():
-    # process input arguments
-    parser = argparse.ArgumentParser(description="""
-            Animate 3D buoyancy field from Oceananigans simualtion.""")
-    parser.add_argument('-f', '--file', action='store', dest='fname',
-            metavar='FILENAME', help='Input simulation data')
-    #parser.add_argument('-f2', '--file2', action='store', dest='fname2',
-    #        metavar='FILENAME', help='Input GOTM data 2')
-    #parser.add_argument('-v', '--variable', action='store', dest='vname',
-    #        metavar='VARNAME', nargs='+', help='Variable name')
-    parser.add_argument('-o', '--output', action='store', dest='fname_out',
-            metavar='FIGNAME', help='Output figure name')
-    #parser.add_argument('-ds', '--date_start', action='store', dest='date_start',
-    #        metavar='STARTDATE',
-    #        help='Starting date of input data, in the format of YYYYMMDD')
-    #parser.add_argument('-de', '--date_end', action='store', dest='date_end',
-    #        metavar='ENDDATE',
-    #        help='Ending date of input data, in the format of YYYYMMDD')
-    parser.add_argument('--version', action='version', version='%(prog)s: 1.0')
-    # parsing arguments and save to args
-    args = parser.parse_args()
-    
-    # check input
-    if not args.fname or not args.fname_out:# or not args.vname
-        print('Oceananigans netCDF data and output figure name are required. Stop.\n')#, variable name,
-        parser.print_help()
-        sys.exit(1)
-    
-    # specify file path
-    if sys.platform == 'linux' or sys.platform == 'linux2':
-        data_dir = '/glade/work/zhihuaz/Data/FrontalZone/'
-        figs_dir = '/glade/u/home/zhihuaz/Projects/TRACE-SEAS/FrontalZone/Figures/'
-    elif sys.platform == 'darwin':
-        data_dir = '/Users/zhihua/Documents/Work/Research/Projects/TRACE-SEAS/FrontalZone/Data/'
-        figs_dir = '/Users/zhihua/Documents/Work/Research/Projects/TRACE-SEAS/FrontalZone/Figures/'
+
+@wrap_matplotlib()
+def plot_3Dbox_surface(dsf, cname=None, vname='b', zlev=-8):
+    plt.rcParams['axes.labelsize'] = 8
+    var_sel = [vname, 'b']
+
+    if vname == 'PV':
+        cmap = 'RdBu_r'
+        cticks = np.arange(-2e-10,3e-10,1e-10)
+        clabel_pad = -50
+        vmin, vmax = -2.5e-10, 2.5e-10
+        var_label = r'Ertel PV'
+        var_extend = 'both'
+        sci_notation = True
+        var_plt = 'PV'
+        coords = 'F'
     else:
-        print('OS not supported.')
+        coords = 'C'
+        if vname == 'b':
+            colorlist = ['xkcd:navy', 'xkcd:cerulean', 'xkcd:sky', 'xkcd:white', 'xkcd:coral', 'xkcd:deep red']
+            nodes = [0.0, 0.7, 0.78, 0.82, 0.9, 1.0]
+            cmap = LinearSegmentedColormap.from_list('buoyancy', list(zip(nodes, colorlist)))
+            cticks = np.arange(0,2,0.2)*1e-4
+            clabel_pad = -45
+            vmin, vmax = -2e-5, 1.9e-4
+            var_label = r'Buoyancy [m s$^{-2}$]'
+            var_extend = 'max'
+            sci_notation = True
+            var_plt = 'bt'
+        elif vname == 'c':
+            # top['logc']   =   np.log10(top.c.clip(1e-6,1)).squeeze().transpose('yC','xC',...)
+            # south['logc'] = np.log10(south.c.clip(1e-6,1)).squeeze().transpose('xC','zC',...)
+            # east['logc']  =  np.log10(east.c.clip(1e-6,1)).squeeze().transpose('yC','zC',...)
+            cmap = 'ocean_r'
+            cticks = np.arange(0,1.2,0.2)#np.arange(-2,0.5,0.5)
+            clabel_pad = -40#-50
+            vmin, vmax = 0, 1#-2, 0
+            var_label = 'c'#r'$\log_{10}(c)$'
+            var_extend = 'max'#'min'
+            sci_notation = False
+            var_plt = 'c'#'logc'
+        elif vname == 'u':
+            cmap = 'RdBu_r'
+            cticks = np.arange(-0.03,0.04,0.01)
+            clabel_pad = -50
+            vmin, vmax = -0.038, 0.038
+            var_label = r'u [m s$^{-1}$]'
+            var_extend = 'both'
+            sci_notation = True
+            var_plt = 'u'
+        elif vname == 'eps':
+            cmap = 'Reds'
+            cticks = np.arange(-9,-6,1)
+            clabel_pad = -50
+            vmin, vmax = -9, -7
+            var_label = r'Dissipation rate $\log_{10}(\epsilon)$'
+            var_extend = 'min'
+            sci_notation = False
+            var_plt = 'logeps'
 
-    # customized colormap
-    colorlist = ['xkcd:navy', 'xkcd:cerulean', 'xkcd:sky', 'xkcd:pale grey', 'xkcd:melon', 'xkcd:deep red']
-    nodes = [0.0, 0.65, 0.78, 0.82, 0.86, 1.0]
-    cmap = LinearSegmentedColormap.from_list('buoyancy', list(zip(nodes, colorlist)))
-
-    # read data
-    fpath = data_dir+args.fname
-    with xr.open_dataset(fpath, group='average').load() as ds:
-        timeTf = ds.timeTf
-    top = xr.open_dataset(fpath, group='slice/top').load()#.chunk('auto')
-    top.close()
+    frame_time = dsf.timeTf
+    top = dsf[var_sel].sel(zC=[zlev], method='nearest')
     z_top_slice = top.zC[0]
-    south = xr.open_dataset(fpath, group='slice/south').load().sel(zC=slice(None,z_top_slice))#.chunk('auto')
-    south.close()
+    south = dsf[var_sel].isel(yC=[0]).sel(zC=slice(None,z_top_slice))
     y_south_slice = south.yC[0]
-    east = xr.open_dataset(fpath, group='slice/east').load().sel(zC=slice(None,z_top_slice))#.chunk('auto')
-    east.close()
+    east = dsf[var_sel].isel(xC=[-1]).sel(zC=slice(None,z_top_slice))
     x_east_slice = east.xC[0]
+    X, Y, Z = np.meshgrid(top.xC, top.yC, east.zC)
+
+    if coords == 'F':
+        top = top.sel(zF=[zlev], method='nearest')
+        zF_top_slice = top.zF[0]
+        south = south.isel(yF=[0]).sel(zF=slice(None,zF_top_slice))
+        yF_south_slice = south.yF[0]
+        east = east.isel(xF=[-1]).sel(zF=slice(None,zF_top_slice))
+        xF_east_slice = east.xF[0]
+        XF, YF, ZF = np.meshgrid(top.xF, top.yF, east.zF)
 
     # total buoyancy
-    top['bt']   = (-top.attrs['M²']   * top.xC   + top.b).squeeze().transpose('yC','xC',...)
-    south['bt'] = (-south.attrs['M²'] * south.xC + south.b).squeeze().transpose('xC','zC',...)
-    east['bt']  = (-east.attrs['M²']  * east.xC  + east.b).squeeze().transpose('yC','zC',...)
+    top['bt']   = (-dsf.attrs['M²'] * dsf.xC +   top.b).squeeze().transpose('yC','xC',...)
+    south['bt'] = (-dsf.attrs['M²'] * dsf.xC + south.b).squeeze().transpose('xC','zC',...)
+    east['bt']  = (-dsf.attrs['M²'] * dsf.xC +  east.b).squeeze().transpose('yC','zC',...)
+
+    if vname == 'eps':
+        varT =   np.log10(top.eps).squeeze().transpose('yC','xC',...)
+        varS = np.log10(south.eps).squeeze().transpose('xC','zC',...)
+        varE =  np.log10(east.eps).squeeze().transpose('yC','zC',...)
+    else:
+        varT =   top[var_plt].squeeze().transpose(f'y{coords}',f'x{coords}',...)
+        varS = south[var_plt].squeeze().transpose(f'x{coords}',f'z{coords}',...)
+        varE =  east[var_plt].squeeze().transpose(f'y{coords}',f'z{coords}',...)
 
     # surface wind
-    taum = int(args.fname[10:13])/1e3
-    taud = int(args.fname[15:18])
-    if args.fname[14] == 'O':
-        temporal_wind = np.sin(2*np.pi*np.maximum((timeTf - 5), 0))
+    taum = int(cname[10:13])/1e3
+    taud = int(cname[15:18])
+    if cname[14] == 'O':
+        temporal_wind = np.sin(2*np.pi*np.maximum((frame_time - 6), 0))
     else:
-        temporal_wind = np.minimum(np.maximum((timeTf - 5), 0) / 2, 1)
+        cos_ramp = (1 - np.cos(np.pi*np.maximum((frame_time - 6), 0) / np.sqrt(2))) / 2
+        if frame_time < (6+np.sqrt(2)):
+            temporal_wind = cos_ramp
+        else:
+            temporal_wind = 1
     taux = np.cos(taud/180*np.pi)*taum*temporal_wind
     tauy = np.sin(taud/180*np.pi)*taum*temporal_wind
 
-    # time interval and initial timestamp in unit of hours
-    dhr = int(((top.time[2] - top.time[1])/np.timedelta64(1,'h')).data)
-    hr0 = int((top.time[0]/np.timedelta64(1,'h')).data)
-
-    X, Y, Z = np.meshgrid(top.xC, top.yC, east.zC)
-
     # limits and contour values
-    # bmin = min([top.bt.min(), east.bt.min(), south.bt.min()])
-    # bmax = max([top.bt.max(), east.bt.max(), south.bt.max()])
-    bmin = -2e-5#np.floor(bmin*1e5)/1e5
-    bmax = 1.9e-4#np.ceil(bmax*1e5)/1e5
-    blines = np.concatenate([np.arange(0,1.4,0.2), np.arange(1.3,2,0.05)])*1e-4
+    blines = np.concatenate([np.arange(0,1.4,0.2), np.arange(1.3,2.6,0.04)])*1e-4
     xmin, xmax = -500, 500
     ymin, ymax = 0, 1000
     zmin, zmax = -140, z_top_slice.data
 
-    Ckw = {'vmin': bmin,
-           'vmax': bmax,
-           'extend': 'max',
-           'levels': np.linspace(bmin, bmax, 256),
+    Ckw = {'vmin': vmin,
+           'vmax': vmax,
+           'extend': var_extend,
+           'levels': np.linspace(vmin, vmax, 256*2),
            'cmap': cmap
           }
-    Lkw = {'linewidths': 0.3,
-       'colors': 'xkcd:almost black'
-      }
-    edges_kw = {'color': 'xkcd:charcoal', 
-                'linewidth': 1.7, 
+    Lkw = {'linewidths': 0.2,
+           'colors': 'xkcd:almost black'
+          }
+    Lkwt = {'linewidths': 0.05,
+            'colors': 'xkcd:almost black'
+           }
+    edges_kw = {'color': 'xkcd:charcoal',
+                'linewidth': 1,
                 'zorder': 2
                }
-    
-    fig = plt.figure(figsize=(6,4.5), constrained_layout=True)
-    ax = fig.add_subplot(111, projection='3d', computed_zorder=False)
-    itime = 0
-    xroll = 0
-    
-    Ct = ax.contourf(X[:, :, -1], Y[:, :, -1], top.bt.isel(time=itime).roll(xC=xroll), zdir='z', offset=z_top_slice, **Ckw)
-    Cs = ax.contourf(X[0, :, :], south.bt.isel(time=itime).roll(xC=xroll), Z[0, :, :], zdir='y', offset=y_south_slice, **Ckw)
-    # xroll doesn't work for east slice!!
-    Ce = ax.contourf(east.bt.isel(time=itime), Y[:, -1, :], Z[:, -1, :], zdir='x', offset=x_east_slice, **Ckw)
 
-    Lt = ax.contour(X[:, :, -1], Y[:, :, -1], top.bt.isel(time=itime).roll(xC=xroll), blines, zdir='z', offset=z_top_slice, **Lkw)
-    Ls = ax.contour(X[0, :, :], south.bt.isel(time=itime).roll(xC=xroll), Z[0, :, :], blines, zdir='y', offset=y_south_slice, **Lkw)
-    Le = ax.contour(east.bt.isel(time=itime), Y[:, -1, :], Z[:, -1, :], blines, zdir='x', offset=x_east_slice, **Lkw)
-    Aw = ax.quiver(300, 1000, 10, 6e3*taux.isel(time=itime), 6e3*tauy.isel(time=itime), 0, normalize=False, colors='k',
-                   arrow_length_ratio=0.2, lw=3, capstyle='round', joinstyle='round')
+    fig = plt.figure(constrained_layout=True)
+    ax = fig.add_subplot(111, projection='3d', computed_zorder=False)
+    xroll = 0
+    if coords == 'F':
+        Ct = ax.contourf(XF[:, :, -1], YF[:, :, -1], varT.roll(xF=xroll), zdir='z', offset=zF_top_slice, **Ckw)
+        Cs = ax.contourf(XF[0, :, :], varS.roll(xF=xroll), ZF[0, :, :], zdir='y', offset=yF_south_slice, **Ckw)
+        Ce = ax.contourf(varE, YF[:, -1, :], ZF[:, -1, :], zdir='x', offset=xF_east_slice, **Ckw)
+    else:
+        Ct = ax.contourf(X[:, :, -1], Y[:, :, -1], varT.roll(xC=xroll), zdir='z', offset=z_top_slice, **Ckw)
+        Cs = ax.contourf(X[0, :, :], varS.roll(xC=xroll), Z[0, :, :], zdir='y', offset=y_south_slice, **Ckw)
+        Ce = ax.contourf(varE, Y[:, -1, :], Z[:, -1, :], zdir='x', offset=x_east_slice, **Ckw)
+
+    Lt = ax.contour(X[:, :, -1], Y[:, :, -1], top.bt.roll(xC=xroll), blines, zdir='z', offset=z_top_slice, **Lkwt)
+    Ls = ax.contour(X[0, :, :], south.bt.roll(xC=xroll), Z[0, :, :], blines, zdir='y', offset=y_south_slice, **Lkw)
+    Le = ax.contour(east.bt, Y[:, -1, :], Z[:, -1, :], blines, zdir='x', offset=x_east_slice, **Lkw)
+    Aw = ax.quiver(300, 1000, 10, 6e3*taux, 6e3*tauy, 0, normalize=False, colors='k',
+                   arrow_length_ratio=0.2, lw=2.5, capstyle='round', joinstyle='round')
 
     ax.plot([xmax, xmax], [ymin, ymax], zmin, **edges_kw)
     ax.plot([xmin, xmax], [ymin, ymin], zmin, **edges_kw)
@@ -155,13 +186,13 @@ def main():
            zticks=[-10, -60, -120],
            xticks=[-400, -200, 0, 200, 400],
            yticks=[100, 300, 500, 700, 900],
-           xlim=[xmin, xmax], 
-           ylim=[ymin, ymax], 
+           xlim=[xmin, xmax],
+           ylim=[ymin, ymax],
            zlim=[zmin, zmax])
     ax.tick_params(axis='both', labelsize=8)
-    ax.view_init(30, -70, 0)
-    ax.set_box_aspect((1,1,0.55), zoom=1.15)
-    ax.set_title(rf'Time / T$_{{inertial}}$ = {timeTf[itime]:.2f}', y=0.999)
+    ax.view_init(45, -68, 0)
+    ax.set_box_aspect((1,1,0.55), zoom=1.1)
+    ax.set_title(rf'$T_{{inertial}}$ = {frame_time:.2f}', y=0.999, x=0.6, fontsize=12)
     ax.xaxis.pane.fill = False
     ax.yaxis.pane.fill = False
     ax.zaxis.pane.fill = False
@@ -170,45 +201,108 @@ def main():
     ax.zaxis.pane.set_edgecolor('w')
     ax.grid(False)
 
-    cbar = fig.colorbar(Ct, ax=ax, fraction=0.025, pad=0.1, ticks=np.arange(0,2,0.2)*1e-4, 
+    cbar = fig.colorbar(Ct, ax=ax, fraction=0.02, pad=0.1, ticks=cticks, 
                         format=FormatScalarFormatter('%.1f'))
-    cbar.set_label(r'Buoyancy [m s$^{-2}$]', labelpad=-42, fontsize=10)
-    cbar.formatter.set_powerlimits((0, 0))
-    cbar.formatter.set_useMathText(True)
-    cbar.ax.get_yaxis().get_offset_text().set_visible(False)
-    exponent_axis = np.floor(np.log10(max(cbar.ax.get_yticks()))).astype(int)
-    cbar.ax.annotate(r'$\times$10$^{%i}$'%(exponent_axis),
-                     xy=(-0.5, 1.06), xycoords='axes fraction')
-    cbar.ax.tick_params(labelsize=8) 
+    cbar.set_label(var_label, labelpad=clabel_pad, fontsize=10)
+    if sci_notation:
+        cbar.formatter.set_powerlimits((0, 0))
+        cbar.formatter.set_useMathText(True)
+        cbar.ax.get_yaxis().get_offset_text().set_visible(False)
+        exponent_axis = np.floor(np.log10(max(cbar.ax.get_yticks()))).astype(int)
+        cbar.ax.annotate(r'$\times$10$^{%i}$'%(exponent_axis), fontsize=8,
+                         xy=(-0.2, 1.08), xycoords='axes fraction')
+    cbar.ax.tick_params(labelsize=8)
+    return fig
 
-    def update(frame):
-        nonlocal Ct, Cs, Ce, Lt, Ls, Le, Aw
-        # for each frame, get new data and clear old data stored on each artist
-        top_field   = top.bt.isel(time=frame).roll(xC=xroll)
-        south_field = south.bt.isel(time=frame).roll(xC=xroll)
-        east_field  = east.bt.isel(time=frame)
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            for obj in (Ct, Cs, Ce, Lt, Ls, Le):
-                for coll in obj.collections:
-                    coll.remove()
-        Aw.remove()
-        # update the plot
-        Ct = ax.contourf(X[:, :, -1], Y[:, :, -1], top_field,   zdir='z', offset=z_top_slice,   **Ckw)
-        Cs = ax.contourf(X[0, :, :], south_field,  Z[0, :, :],  zdir='y', offset=y_south_slice, **Ckw)
-        Ce = ax.contourf(east_field, Y[:, -1, :],  Z[:, -1, :], zdir='x', offset=x_east_slice,  **Ckw)
-        Lt = ax.contour(X[:, :, -1], Y[:, :, -1], top_field,   blines, zdir='z', offset=z_top_slice,   **Lkw)
-        Ls = ax.contour(X[0, :, :],  south_field, Z[0, :, :],  blines, zdir='y', offset=y_south_slice, **Lkw)
-        Le = ax.contour(east_field,  Y[:, -1, :], Z[:, -1, :], blines, zdir='x', offset=x_east_slice,  **Lkw)
-        Aw = ax.quiver(300, 1000, 10, 6e3*taux.isel(time=frame), 6e3*tauy.isel(time=frame), 0, normalize=False, colors='k',
-                   arrow_length_ratio=0.2, lw=3, capstyle='round', joinstyle='round')
-        ax.set_title(rf'Time / T$_{{inertial}}$ = {timeTf[frame]:.2f}', y=0.999)
-        return Ct, Cs, Ce, Lt, Ls, Le, Aw
-    
-    ani = animation.FuncAnimation(fig=fig, func=update, frames=range(top.dims['time']), 
-                                  interval=400, repeat_delay=800)#, blit=True
-    # save animation
-    ani.save(figs_dir+args.fname_out, writer='ffmpeg', fps=5, dpi=200)
+
+def main():
+    # process input arguments
+    parser = argparse.ArgumentParser(description="""
+            Animate 3D field from Oceananigans simualtion.""")
+    parser.add_argument('-c', '--case', action='store', dest='cname',
+            metavar='CASENAME', help='Input simulation case name')
+    #parser.add_argument('-f2', '--file2', action='store', dest='fname2',
+    #        metavar='FILENAME', help='Input GOTM data 2')
+    parser.add_argument('-v', '--variable', action='store', dest='vname',
+           metavar='VARNAME', help='Variable name')
+    #parser.add_argument('-ds', '--date_start', action='store', dest='date_start',
+    #        metavar='STARTDATE',
+    #        help='Starting date of input data, in the format of YYYYMMDD')
+    #parser.add_argument('-de', '--date_end', action='store', dest='date_end',
+    #        metavar='ENDDATE',
+    #        help='Ending date of input data, in the format of YYYYMMDD')
+    parser.add_argument('--version', action='version', version='%(prog)s: 1.0')
+    # parsing arguments and save to args
+    args = parser.parse_args()
+
+    # check input
+    if not args.cname or not args.vname:
+        print('Simulation case name, variable name are required. Stop.\n')
+        parser.print_help()
+        sys.exit(1)
+
+    # specify file path
+    if sys.platform == 'linux' or sys.platform == 'linux2':
+        data_dir = '/glade/derecho/scratch/zhihuaz/FrontalZone/Output/'
+        anis_dir = '/glade/u/home/zhihuaz/Projects/TRACE-SEAS/FrontalZone/Animations/'
+    elif sys.platform == 'darwin':
+        data_dir = '/Users/zhihua/Documents/Work/Research/Projects/TRACE-SEAS/FrontalZone/Data/'
+        anis_dir = '/Users/zhihua/Documents/Work/Research/Projects/TRACE-SEAS/FrontalZone/Animations/'
+    else:
+        print('OS not supported.')
+
+    # cluster = LocalCluster()
+    # client = Client(cluster)
+    # print(cluster.dashboard_link.replace(':8787', ':1212/proxy/8787'))
+
+    # read data
+    fpath = data_dir+args.cname+'_full.nc'
+    dsf = xr.open_dataset(fpath).chunk({'time':1})
+    dsf.close()
+    dsf['timeTf'] = dsf.time/np.timedelta64(int(np.around(2*np.pi/dsf.f)), 's')
+
+    outname = anis_dir+args.cname+'_'+args.vname+'3d.mp4'
+    var_in = [args.vname, 'b', 'timeTf']
+    resources = [dsf[var_in].isel(time=i) for i in range(dsf.sizes['time'])]
+    stream(resources, renderer=plot_3Dbox_surface,
+           renderer_kwargs=dict(cname=args.cname, vname=args.vname, zlev=-8),
+           uri=outname, max_frames=-1)
+    # mov = Movie(dsf, plot_3Dbox_surface, input_check=False, cname=args.cname, vname=args.vname, z=-8)
+    # mov.save(outname, parallel=True, overwrite_existing=True,
+    #          parallel_compute_kwargs=dict(scheduler='processes', num_workers=8))
+
+
+# def update(frame):
+#     nonlocal Ct, Cs, Ce, Lt, Ls, Le, Aw
+#     # for each frame, get new data and clear old data stored on each artist
+#     top_field   = vart.isel(time=frame).roll(xC=xroll)
+#     south_field = vars.isel(time=frame).roll(xC=xroll)
+#     east_field  = vare.isel(time=frame)
+#     with warnings.catch_warnings():
+#         warnings.simplefilter('ignore')
+#         for obj in (Ct, Cs, Ce, Lt, Ls, Le):
+#             for coll in obj.collections:
+#                 coll.remove()
+#     Aw.remove()
+#     # update the plot
+#     Ct = ax.contourf(X[:, :, -1], Y[:, :, -1], top_field,   zdir='z', offset=z_top_slice,   **Ckw)
+#     Cs = ax.contourf(X[0, :, :], south_field,  Z[0, :, :],  zdir='y', offset=y_south_slice, **Ckw)
+#     Ce = ax.contourf(east_field, Y[:, -1, :],  Z[:, -1, :], zdir='x', offset=x_east_slice,  **Ckw)
+#     Lt = ax.contour(X[:, :, -1], Y[:, :, -1], top.bt.isel(time=frame).roll(xC=xroll), 
+#                     blines, zdir='z', offset=z_top_slice,   **Lkwt)
+#     Ls = ax.contour(X[0, :, :],  south.bt.isel(time=frame).roll(xC=xroll), Z[0, :, :], 
+#                     blines, zdir='y', offset=y_south_slice, **Lkw)
+#     Le = ax.contour(east.bt.isel(time=frame), Y[:, -1, :], Z[:, -1, :], 
+#                     blines, zdir='x', offset=x_east_slice,  **Lkw)
+#     Aw = ax.quiver(300, 1000, 10, 6e3*taux.isel(time=frame), 6e3*tauy.isel(time=frame), 0, normalize=False, colors='k',
+#                arrow_length_ratio=0.2, lw=3, capstyle='round', joinstyle='round')
+#     ax.set_title(rf'Time / T$_{{inertial}}$ = {timeTf[frame]:.2f}', y=0.999)
+#     return Ct, Cs, Ce, Lt, Ls, Le, Aw
+
+
+# ani = animation.FuncAnimation(fig=fig, func=update, frames=range(top.sizes['time']), 
+#                               interval=200, repeat_delay=800)#, blit=True
+# ani.save(figs_dir+args.fname_out, writer='ffmpeg', fps=6, dpi=200)
 
 
 if __name__ == "__main__":
