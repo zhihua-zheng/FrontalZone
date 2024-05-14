@@ -1,85 +1,233 @@
-using Oceananigans
-using Oceananigans.Operators
-using Oceananigans.Advection: div_Uc
-using Oceananigans.TurbulenceClosures: ∇_dot_qᶜ, diffusivity, viscosity 
-using Oceananigans.Models.NonhydrostaticModels: tracer_tendency
-using Oceananigans.Utils: SumOfArrays
+using Oceananigans.Fields: ZeroField
+#using Oceananigans.TurbulenceClosures: diffusivity, viscosity 
+#using Oceananigans.Models.NonhydrostaticModels: tracer_tendency
+#using Oceananigans.Utils: SumOfArrays
 
-@inline ψ′²(i, j, k, grid, ψ, ψ̄) = @inbounds (ψ[i, j, k] - ψ̄[i, j, k])^2
-@inline kinetic_energy_ccc(i, j, k, grid, u, v, w, U, V, W) = (ℑxᶜᵃᵃ(i, j, k, grid, ψ′², u, U) +
-                                                               ℑyᵃᶜᵃ(i, j, k, grid, ψ′², v, V) +
-                                                               ℑzᵃᵃᶜ(i, j, k, grid, ψ′², w, W)) / 2
+#using Oceanostics.FlowDiagnostics: ErtelPotentialVorticity#, RichardsonNumber, RossbyNumber
+using Oceanostics.TKEBudgetTerms: PressureRedistributionTerm
+#using Oceanostics.PotentialEnergyEquationTerms: PotentialEnergy
 
-function get_output_tuple(model; extra_outputs=false)
-    grid = model.grid
-    advection = model.advection
 
-    u, v, w = velocities = model.velocities
-    b = model.tracers.b
-    ζ = Field(∂x(v) - ∂y(u))
+fff_scratch = Field{Face, Face, Face}(grid)
+#ccc_scratch = Field{Center, Center, Center}(grid)
+#cnc_scratch = Field{Center, Nothing, Center}(grid)
+
+#function XYSlice(grid, z)
+#    i = Colon()
+#    j = Colon()
+#    ks = searchsortedfirst.(Ref(znodes(grid, Center(), Center(), Face())), z)
+#    return ((i, j, k) for k=ks)
+#end
+
+#@inline fψ²_plus_gφ²(i, j, k, grid, f, ψ, g, φ) = f(i, j, k, grid, ψ)^2 + g(i, j, k, grid, φ)^2
+
+#function pseudo_isotropic_viscous_dissipation_rate_ccc(i, j, k, grid, u, v, w, p)
+#    dudx² = ∂xᶜᶜᶜ(i, j, k, grid, u)^2
+#    dvdy² = ∂yᶜᶜᶜ(i, j, k, grid, v)^2
+#    dwdz² = ∂zᶜᶜᶜ(i, j, k, grid, w)^2
+
+#    dudy² = ℑxyᶜᶜᵃ(i, j, k, grid, ∂yᶠᶠᶜ, u)^2
+#    dvdx² = ℑxyᶜᶜᵃ(i, j, k, grid, ∂xᶠᶠᶜ, v)^2
+
+#    dudz² = ℑxzᶜᵃᶜ(i, j, k, grid, ∂zᶠᶜᶠ, u)^2
+#    dwdx² = ℑxzᶜᵃᶜ(i, j, k, grid, ∂xᶠᶜᶠ, w)^2
+
+#    dvdz² = ℑyzᵃᶜᶜ(i, j, k, grid, ∂zᶜᶠᶠ, v)^2
+#    dwdy² = ℑyzᵃᶜᶜ(i, j, k, grid, ∂yᶜᶠᶠ, w)^2
+
+    #dudy²_plus_dvdx² = ℑxyᶜᶜᵃ(i, j, k, grid, fψ²_plus_gφ², ∂yᶠᶠᶜ, u, ∂xᶠᶠᶜ, v)
+    #dudz²_plus_dwdx² = ℑxzᶜᵃᶜ(i, j, k, grid, fψ²_plus_gφ², ∂zᶠᶜᶠ, u, ∂xᶠᶜᶠ, w)
+    #dvdz²_plus_dwdy² = ℑyzᵃᶜᶜ(i, j, k, grid, fψ²_plus_gφ², ∂zᶜᶠᶠ, v, ∂yᶜᶠᶠ, w)
+
+#    ν = _νᶜᶜᶜ(i, j, k, grid, p.closure, p.diffusivity_fields, p.clock)
+#    return ν * (dudx² + dvdy² + dwdz² + dudy² + dvdx² + dudz² + dwdx² + dvdz² + dwdy²)
+    #return ν * (dudx² + dvdy² + dwdz² + dudy²_plus_dvdx² + dudz²_plus_dwdx² + dvdz²_plus_dwdy²)
+#end
+
+#function PseudoIsotropicKineticEnergyDissipationRate(model; U=0, V=0, W=0,
+#                                         location = (Center, Center, Center))
+
+#    validate_location(location, "PseudoIsotropicKineticEnergyDissipationRate")
+#    validate_dissipative_closure(model.closure)
+
+#    u, v, w = model.velocities
+
+#    parameters = (closure = model.closure,
+#                  diffusivity_fields = model.diffusivity_fields,
+#                  clock = model.clock)
+
+#    return KernelFunctionOperation{Center, Center, Center}(pseudo_isotropic_viscous_dissipation_rate_ccc, model.grid,
+#                                                           (u - U), (v - V), (w - W), parameters)
+#end
+
+#@inline function uᵢ∂ᵢtkeᶜᶜᶜ(i, j, k, grid, velocities, tke)
+#    u∂x_tke = ℑxᶜᵃᵃ(i, j, k, grid, ψf, velocities.u, ∂xᶠᶜᶜ, tke)
+#    v∂y_tke = ℑyᵃᶜᵃ(i, j, k, grid, ψf, velocities.v, ∂yᶜᶠᶜ, tke)
+#    w∂z_tke = ℑzᵃᵃᶜ(i, j, k, grid, ψf, velocities.w, ∂zᶜᶜᶠ, tke)
+#    return u∂x_tke + v∂y_tke + w∂z_tke
+#end
+#
+#function TurbulenceRedistributionTerm(model::NonhydrostaticModel, tke; velocities=model.velocities)
+#    return KernelFunctionOperation{Center, Center, Center}(uᵢ∂ᵢtkeᶜᶜᶜ, model.grid, velocities, tke)
+#end
+
+#@inline function ∂ⱼ_uᵢτᵢⱼᶜᶜᶜ(i, j, k, grid, diffusivity_fields, fields, p)
+#    τᵢⱼ∂ⱼ_uᵢ_ccc = viscous_dissipation_rate_ccc(i, j, k, grid, diffusivity_fields, fields, p)
+#    uᵢ∂ⱼ_τᵢⱼ_ccc = uᵢ∂ⱼ_τᵢⱼᶜᶜᶜ(i, j, k, grid, p.closure, diffusivity_fields, p.clock, fields, p.buoyancy)
+#    return uᵢ∂ⱼ_τᵢⱼ_ccc - τᵢⱼ∂ⱼ_uᵢ_ccc
+#end
+#
+#@inline function SubgridscaleRedistributionTerm(model::NonhydrostaticModel; U=ZeroField(), V=ZeroField(), W=ZeroField())
+#    mean_velocities = (u=U, v=V, w=W)
+#    model_fields = perturbation_fields(model; mean_velocities...)
+#    parameters = (; model.closure,
+#                  model.clock,
+#                  model.buoyancy)
+#    return KernelFunctionOperation{Center, Center, Center}(∂ⱼ_uᵢτᵢⱼᶜᶜᶜ, model.grid,
+#                                                           model.diffusivity_fields, model_fields, parameters)
+#end
+
+
+@inline function get_output_tuple(model, uˢ, vˢ, Vg, p; extra_outputs=false)
+    uE = Field(model.velocities.u - uˢ)
+    vE = ifelse(p.use_background_Vg, Field(model.velocities.v - vˢ),
+                                     Field(model.velocities.v - vˢ - Vg))
+    w  = model.velocities.w
+    b  = model.tracers.b
+    c  = model.tracers.c
+
+    wᶠᶠᶠ = @at (Face,   Face,   Face)   w
+    wᶜᶜᶜ = @at (Center, Center, Center) w
+    uᶜᶜᶜ = @at (Center, Center, Center) uE 
+    vᶜᶜᶜ = @at (Center, Center, Center) vE 
+
+    #bt = Field(b + model.background_fields.tracers.b)
+    #Ri = Field(RichardsonNumber(model, uE, vE, w, model.tracers.b))
+    #Ro = Field(RossbyNumber(model, uE, vE, w, model.coriolis))
+    q = Field(ErtelPotentialVorticityFrontalZone(model, uE, vE, w, b, model.coriolis, M²=p.M²), data=fff_scratch.data)
 
     # Along-front average
-    B  = Field(Average(b, dims=2))
-    U  = Field(Average(u, dims=2))
-    V  = Field(Average(v, dims=2))
-    W  = Field(Average(w, dims=2))
-    wb = @at (Center, Center, Center) Field(w * b)
-    wbym = Field(Average(wb, dims=2))
-    ww = @at (Center, Center, Center) Field(w * w)
-    w2ym = Field(Average(ww, dims=2))
-    www = @at (Center, Center, Center) Field(ww * w)
-    w3ym = Field(Average(www, dims=2))
+    #bym = Field(Average(b, dims=2), data=cnc_scratch.data)
+    #cym = Field(Average(c, dims=2), data=cnc_scratch.data)
+    #uym = Field(Average(u_ccc, dims=2), data=cnc_scratch.data)
+    #vym = Field(Average(v_ccc, dims=2), data=cnc_scratch.data)
+    #wym = Field(Average(w_ccc, dims=2), data=cnc_scratch.data)
+
+    #Riym = Field(Average(Ri, dims=2))
+    #Roym = Field(Average(Ro, dims=2))
+    #PVym = Field(Average(PV, dims=2))
+    
+    # Diffusivity & viscosity
+    #ufrc = -KernelFunctionOperation{Center, Center, Center}(∂ⱼ_τ₁ⱼ,   grid, model.closure, model.diffusivity_fields,
+    #                                                        model.clock, fields(model), model.buoyancy)
+    #vfrc = -KernelFunctionOperation{Center, Center, Center}(∂ⱼ_τ₂ⱼ,   grid, model.closure, model.diffusivity_fields,
+    #                                                        model.clock, fields(model), model.buoyancy)
+    #wfrc = -KernelFunctionOperation{Center, Center, Center}(∂ⱼ_τ₃ⱼ,   grid, model.closure, model.diffusivity_fields,
+    #                                                        model.clock, fields(model), model.buoyancy)
+    #bdia = -KernelFunctionOperation{Center, Center, Center}(∇_dot_qᶜ, grid, model.closure, model.diffusivity_fields, Val(1), b,
+    #                                                        model.clock, fields(model), model.buoyancy)
+    #νₑ = sum(viscosity(model.closure, model.diffusivity_fields))
+    #κₑ = sum(diffusivity(model.closure, model.diffusivity_fields, Val(:b)))
+    #νₑ_ccc = viscosity(model.closure, model.diffusivity_fields)
+    #κₑ_ccc = diffusivity(model.closure, model.diffusivity_fields, Val(:b))
+    #νₑ_ccf = @at (Center, Center, Face) νₑ_ccc
+    #κₑ_ccf = @at (Center, Center, Face) κₑ_ccc
+    #νₑhm = Field(Average(νₑ_ccf, dims=(1,2)))
+    #κₑhm = Field(Average(κₑ_ccf, dims=(1,2)))
+
+    wusgs = @at (Nothing, Nothing, Center) Field(Average(XSubgridscaleVerticalMomentumFlux(model), dims=(1,2)))
+    wvsgs = @at (Nothing, Nothing, Center) Field(Average(YSubgridscaleVerticalMomentumFlux(model), dims=(1,2)))
+    wbsgs = @at (Nothing, Nothing, Center) Field(Average(SubgridscaleVerticalTracerFlux(model, :b), dims=(1,2)))
+    wcsgs = @at (Nothing, Nothing, Center) Field(Average(SubgridscaleVerticalTracerFlux(model, :c), dims=(1,2)))
+
+    # Correlations
+    uh = Field(Average(uE, dims=(1,2)))
+    vh = Field(Average(vE, dims=(1,2)))
+    u′ = Field(uE - uh)
+    v′ = Field(vE - vh)
+    mean_velocities = (u=uh, v=vh, w=ZeroField())
+    pert_velocities = (u=u′, v=v′, w=w)
+    geo_velocities  = (u=ZeroField(), v=Vg, w=ZeroField())
+
+    uhᶜ = Field(Average(uᶜᶜᶜ, dims=(1,2)))
+    vhᶜ = Field(Average(vᶜᶜᶜ, dims=(1,2)))
+    bh  = Field(Average(b,    dims=(1,2)))
+    ch  = Field(Average(c,    dims=(1,2)))
+    qh  = Field(Average(q,    dims=(1,2)))
+    u′ᶜ = Field(uᶜᶜᶜ - uhᶜ)
+    v′ᶜ = Field(vᶜᶜᶜ - vhᶜ)
+    b′  = Field(b    - bh )
+    c′  = Field(c    - ch )
+    q′  = Field(q    - qh )
+    uut = Field(Average(u′ᶜ  * u′ᶜ , dims=(1,2)))
+    vvt = Field(Average(v′ᶜ  * v′ᶜ , dims=(1,2)))
+    wwt = Field(Average(wᶜᶜᶜ * wᶜᶜᶜ, dims=(1,2)))
+    bbt = Field(Average(b′   * b′  , dims=(1,2)))
+    cct = Field(Average(c′   * c′  , dims=(1,2)))
+    wut = Field(Average(wᶜᶜᶜ * u′ᶜ , dims=(1,2)))
+    wvt = Field(Average(wᶜᶜᶜ * v′ᶜ , dims=(1,2)))
+    wbt = Field(Average(wᶜᶜᶜ * b′  , dims=(1,2)))
+    wct = Field(Average(wᶜᶜᶜ * c′  , dims=(1,2)))
+    wqt = Field(Average(wᶠᶠᶠ * q′  , dims=(1,2)))
+    uvt = Field(Average(u′ᶜ  * v′ᶜ , dims=(1,2)))
+
+    #Tsgshm = Field(Average(SubgridscaleRedistributionTerm(model, U=uh, V=vh), dims=(1,2)))
+    
+    TKE_eps = Field(Average(KineticEnergyDissipation(model, energy_vel=pert_velocities), dims=(1,2)))
+    TKE_prs = Field(Average(PressureRedistributionTerm(model), dims=(1,2)))
+    TKE_tur = Field(Average(KineticEnergyAdvection(model, velocities=pert_velocities, energy_vel=pert_velocities), dims=(1,2)))
+    TKE_sgs = Field(Average(KineticEnergyStress(model, energy_vel=pert_velocities), dims=(1,2)))
+    TKE_spg = Field(Average(KineticEnergyForcing(model, energy_vel=pert_velocities), dims=(1,2)))
+
+    MKE_eps = Field(Average(KineticEnergyDissipation(model, energy_vel=mean_velocities), dims=(1,2)))
+    MKE_tur = Field(Average(KineticEnergyAdvection(model, velocities=pert_velocities, energy_vel=mean_velocities), dims=(1,2)))
+    MKE_sgs = Field(Average(KineticEnergyStress(model, energy_vel=mean_velocities), dims=(1,2)))
+    MKE_spg = Field(Average(KineticEnergyForcing(model, energy_vel=mean_velocities), dims=(1,2)))
+
+    CKE_eps = Field(Average(KineticEnergyDissipation(model, energy_vel=geo_velocities), dims=(1,2)))
+    CKE_tur = Field(Average(KineticEnergyAdvection(model, velocities=pert_velocities, energy_vel=geo_velocities), dims=(1,2)))
+    CKE_sgs = Field(Average(KineticEnergyStress(model, energy_vel=geo_velocities), dims=(1,2)))
+    CKE_spg = Field(Average(KineticEnergyForcing(model, energy_vel=geo_velocities), dims=(1,2)))
+
+    # Surface fluxes
+    Qu = Field(Average(SurfaceMomentumFlux(model, :u), dims=(1,2)))
+    Qv = Field(Average(SurfaceMomentumFlux(model, :v), dims=(1,2)))
+
+    #www = @at (Center, Center, Center) Field(ww * w)
+    #w3ym = Field(Average(www, dims=2))
 
     # Equivalence of volume averaged PV through divergence theorem
     # If use Integral, we have to wrap the vorticity and buoyancy into fields first
-    Bbkf = Field{Face, Face, Face}(grid)
-    set!(Bbkf, (x, y, z) -> (-pm.M² * x))
-    bf   = @at (Face, Face, Face) b
-    btf  = Field(bf + Bbkf)
-    v_zf = @at (Center, Face, Face) v
-    v_xf = @at (Face, Face, Center) v
-    u_zf = @at (Face, Center, Face) u
-    w_xf = @at (Face, Center, Face) w
-    ωᶻ   = Field(∂x(v_zf) - ∂y(u_zf))
-    ωˣ   = Field(∂y(w_xf) - ∂z(v_xf))
-    PVfz = Field(Average(ωᶻ*btf, dims=(1,2)))
-    #PVfx = Field(Average(ωˣ*btf, dims=(2,3)))
-    RVx = Field(Average(ωˣ, dims=(2,3)))
+    #Bbkf = Field{Face, Face, Face}(grid)
+    #set!(Bbkf, (x, y, z) -> (-pm.M² * x))
+#    vfcf = @at (Face, Center, Face) v
+#    wffc = @at (Face, Face, Center) w
+#    ωᶻ   = @at (Center, Center, Center) Field(∂x(v) - ∂y(u))
+#    ωˣ   = Field(∂y(wffc) - ∂z(vfcf))
+#    PVfz = Field(Average(ωᶻ*bt, dims=(1,2)))
+#    RVx  = Field(Average(ωˣ,    dims=(2,3)))
     #pv = ErtelPotentialVorticity(model; location=(Face, Face, Face), add_background=true)
     #PV = Field(Average(pv, dims=2))
     #wpv_op = @at (Face, Face, Face) w * pv
     #Jz_adv = Average(wpv_op, dims=2)
     #Jz_fric =
     #Jz_dia
-    
-    # Horizontal average of stratification 
-    bfhm = Field(Average(bf, dims=(1,2)))
-    #∂b∂z_bcs = FieldBoundaryConditions(grid, (Nothing, Nothing, Face);
-    #                                   top    = OpenBoundaryCondition(-pm.B₀/pm.κ₀),
-    #                                   bottom = OpenBoundaryCondition(pm.N₁²))
-    #∂b∂z_hrzt_mean = Field(∂z(b_hrzt_mean), boundary_conditions=∂b∂z_bcs)
-    #N²hm = Field(@at (Nothing, Nothing, Center) ∂b∂z_hrzt_mean)
-   
-    # Turbulent Kinetic Energy
-    u_hrzt_mean = Field(Average(U, dims=1))
-    v_hrzt_mean = Field(Average(V, dims=1))
-    w_hrzt_mean = Field(Average(W, dims=1))
-    tke_op = KernelFunctionOperation{Center, Center, Center}(kinetic_energy_ccc,
-                                                             grid, u, v, w, u_hrzt_mean, v_hrzt_mean, w_hrzt_mean)
-    TKE = Field(Average(tke_op, dims=(1,2)))
-
-    # Diffusivity & viscosity
-    νₑc = sum(viscosity(model.closure, model.diffusivity_fields))
-    κₑc = sum(diffusivity(model.closure, model.diffusivity_fields, Val(:b)))
-    νₑ  = Field(@at (Center, Center, Face) νₑc)
-    κₑ  = Field(@at (Center, Center, Face) κₑc)
 
     # Assemble outputs
-    fields_slice = Dict("u" => u, "v" => v, "w" => w, "b" => b, "ζ" => ζ, "νₑ" => νₑ, "κₑ" => κₑ)
-    line_mean = Dict("B" => B, "U" => U, "V" => V, "W" => W, "wbym" => wbym, 
-                     "w2ym" => w2ym, "w3ym" => w3ym)
-    slice_mean = Dict("bfhm" => bfhm, "TKE" => TKE, "PVfz" => PVfz, "RVx" => RVx) #"PVfx" => PVfx,
-    fields_mean = merge(line_mean, slice_mean)
+    fields_slice = Dict("u" => uᶜᶜᶜ, "v" => vᶜᶜᶜ, "w" => wᶜᶜᶜ, "b" => b, "c" => c, "q" => q)
+#                        "ufrc" => ufrc, "vfrc" => vfrc, "wfrc" => wfrc, "bdia" => bdia, "νₑ" => νₑ, "κₑ" => κₑ)
+    fields_mean = Dict(
+#                       "bym" => bym, "cym" => cym, "uym" => uym, "vym" => vym, "wym" => wym,
+                       "u" => uhᶜ, "v" => vhᶜ, "b" => bh, "c" => ch, "q" => qh,
+                       "uut" => uut, "vvt" => vvt, "wwt" => wwt, "bbt" => bbt, "cct" => cct,
+                       "wut" => wut, "wvt" => wvt, "uvt" => uvt, "wbt" => wbt, "wct" => wct, "wqt" => wqt,
+                       "wusgs" => wusgs, "wvsgs" => wvsgs, "wbsgs" => wbsgs, "wcsgs" => wcsgs,
+                       "Qu" => Qu, "Qv" => Qv,
+                       "TKE_eps" => TKE_eps, "TKE_tur" => TKE_tur, "TKE_sgs" => TKE_sgs, "TKE_spg" => TKE_spg, "TKE_prs" => TKE_prs,
+                       "MKE_eps" => MKE_eps, "MKE_tur" => MKE_tur, "MKE_sgs" => MKE_sgs, "MKE_spg" => MKE_spg,
+                       "CKE_eps" => CKE_eps, "CKE_tur" => CKE_tur, "CKE_sgs" => CKE_sgs, "CKE_spg" => CKE_spg)
+#                       "Roym" => Roym, "Riym" => Riym, "PVym" => PVym,
+#                       "PVfz" => PVfz, "RVx" => RVx)
 
     if extra_outputs
         pHSA = Field(Average(model.pressures.pHY′, dims=2))
@@ -111,11 +259,6 @@ end
 
 #adv_cfl(model) = AdvectiveCFL(simulation.Δt)(model)
 #dif_cfl(model) = DiffusiveCFL(simulation.Δt)(model)
-
-#w′ = w - w_hrzt_mean
-#b′ = b - b_hrzt_mean
-#w′b′_op = @at (Center, Center, Center) w′ * b′
-#w′b′ = Average(w′b′_op, dims=(2νₑ = @at (Center, Nothing, Face) model.diffusivity_fields[2].νₑ
 
 #function write_to_ds(dsname, varname, data; mode="c", coords=("xC", "yC", "zC"), dtype=Float64)
 #    NCD.NCDataset(dsname, mode) do ds
