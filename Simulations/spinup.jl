@@ -1,5 +1,5 @@
 ### Setup dependencies
-using Pkg; Pkg.instantiate()
+#using Pkg; Pkg.instantiate()
 
 #import NCDatasets as NCD
 
@@ -175,7 +175,7 @@ simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterv
 
 ###########-------- CHECKPOINTER --------------#############
 @info "Add checkpointer..."
-ckpdir = "/glade/work/zhihuaz/Restart/FrontalZone/Front"
+ckpdir = "/glade/derecho/scratch/zhihuaz/FrontalZone/Restart/Regular"
 ispath(ckpdir) && rm(ckpdir, recursive=true, force=true)
 mkdir(ckpdir)
 simulation.output_writers[:checkpointer] = Checkpointer(model, schedule=TimeInterval(Tinertial), 
@@ -185,5 +185,5 @@ simulation.output_writers[:checkpointer] = Checkpointer(model, schedule=TimeInte
 ###########-------- RUN! --------------#############
 run(`nvidia-smi`) # check how much memory used on a GPU run
 @info "Run...."
-run!(simulation)#, pickup="/glade/work/zhihuaz/Restart/FrontalZone/spinup/checkpoint_iteration17528.jld2")
+run!(simulation)
 @info "Simulation completed in " * prettytime(simulation.run_wall_time)
