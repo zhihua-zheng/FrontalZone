@@ -11,6 +11,7 @@ run_frontal_zone.sh
 run_eady_mwe.sh
 Simulations/eady_mwe.jl
 Figures/
+Animations/
 Data/
 Logs/
 */__pycache__
