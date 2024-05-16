@@ -51,15 +51,9 @@ def main():
 
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
-        #dzC = grid.diff(dsa.zC, axis='z', boundary='extend')
-        #dzC = dzC.where(dzC.zF != dzC.zF[-1]).fillna(dzF[-1])
-        #dzC = dzC.where(dzC.zF != dzC.zF[0]).fillna(dzF[0]).data
         u_f = grid.interp(dsa.u,    axis='z', boundary='extend')
         v_f = grid.interp(dsa.v,    axis='z', boundary='extend')
         Vgf = grid.interp(dsa.Vbak, axis='z', boundary='extend')
-        #dvdz_f = grid.diff(dsa.v, axis='z', boundary='extend') / dzC 
-        #Tau23 = -dsa['νₑ']*dvdz_f
-        #dTau23dz = grid.diff(Tau23, axis='z') / dzF
         dsa['dudz'] = grid.diff(u_f, axis='z') / dzF
         dsa['dvdz'] = grid.diff(v_f, axis='z') / dzF
         dsa['dVdz'] = grid.diff(Vgf, axis='z') / dzF
@@ -86,10 +80,10 @@ def main():
     dsa['CKE_stress'] = dsa.CKE_sgs + dsa.CKE_stress_top
     dsa['CKE_GPW'] = -dsa.u * dsa.Vbak * dsa.f
 
-    #dsa['wusgs'] = dsa.wusgs.interp(zF=dsa.zC).drop_vars('zF')
-    #dsa['wvsgs'] = dsa.wvsgs.interp(zF=dsa.zC).drop_vars('zF')
-    #dsa['wbsgs'] = dsa.wbsgs.interp(zF=dsa.zC).drop_vars('zF')
-    #dsa['wcsgs'] = dsa.wcsgs.interp(zF=dsa.zC).drop_vars('zF')
+    # fix Ertel PV at the surface, where the model thinks dVdz = 0
+    qsurf = dsa.q.isel(zF=-1)
+    qbak  = - dsa.attrs['M²']**2 / dsa.f
+    dsa['q'] = dsa.q.where(dsa.zF != dsa.zF[-1], qsurf - qbak)
 
     fpath = data_dir+args.cname+'_KE_budgets.nc'
     dsa.to_netcdf(fpath)
