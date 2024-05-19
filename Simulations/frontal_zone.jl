@@ -78,8 +78,8 @@ grid = RectilinearGrid(GPU(),
 
 ###########-------- TIME-INVARIANT BACKGROUND FIELDS -----------------#############
 @info "Set up background fields...."
-background_params = (; pm.M², pm.f, pm.hᵢ)
-@inline V̅(x, y, z, t, p)  = -p.M² / p.f * (z + p.hᵢ)
+background_params = (; pm.M², pm.f, pm.Lz)
+@inline V̅(x, y, z, t, p)  = -p.M² / p.f * (z + p.Lz/2)
 @inline B̅(x, y, z, t, p)  = -p.M² * x
 
 V_field = BackgroundField(V̅, parameters=background_params)

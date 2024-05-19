@@ -135,10 +135,10 @@ fff_scratch = Field{Face, Face, Face}(grid)
     #νₑhm = Field(Average(νₑ_ccf, dims=(1,2)))
     #κₑhm = Field(Average(κₑ_ccf, dims=(1,2)))
 
-    wusgs = @at (Nothing, Nothing, Center) Field(Average(XSubgridscaleVerticalMomentumFlux(model), dims=(1,2)))
-    wvsgs = @at (Nothing, Nothing, Center) Field(Average(YSubgridscaleVerticalMomentumFlux(model), dims=(1,2)))
-    wbsgs = @at (Nothing, Nothing, Center) Field(Average(SubgridscaleVerticalTracerFlux(model, :b), dims=(1,2)))
-    wcsgs = @at (Nothing, Nothing, Center) Field(Average(SubgridscaleVerticalTracerFlux(model, :c), dims=(1,2)))
+    wusgs = Field(Average(XSubgridscaleVerticalMomentumFlux(model),  dims=(1,2)))
+    wvsgs = Field(Average(YSubgridscaleVerticalMomentumFlux(model),  dims=(1,2)))
+    wbsgs = Field(Average(SubgridscaleVerticalTracerFlux(model, :b), dims=(1,2)))
+    wcsgs = Field(Average(SubgridscaleVerticalTracerFlux(model, :c), dims=(1,2)))
 
     # Correlations
     uh = Field(Average(uE, dims=(1,2)))
@@ -192,9 +192,6 @@ fff_scratch = Field{Face, Face, Face}(grid)
     # Surface fluxes
     Qu = Field(Average(SurfaceMomentumFlux(model, :u), dims=(1,2)))
     Qv = Field(Average(SurfaceMomentumFlux(model, :v), dims=(1,2)))
-
-    #www = @at (Center, Center, Center) Field(ww * w)
-    #w3ym = Field(Average(www, dims=2))
 
     # Equivalence of volume averaged PV through divergence theorem
     # If use Integral, we have to wrap the vorticity and buoyancy into fields first
@@ -256,21 +253,3 @@ fff_scratch = Field{Face, Face, Face}(grid)
     end
     return fields_slice, fields_mean
 end
-
-#adv_cfl(model) = AdvectiveCFL(simulation.Δt)(model)
-#dif_cfl(model) = DiffusiveCFL(simulation.Δt)(model)
-
-#function write_to_ds(dsname, varname, data; mode="c", coords=("xC", "yC", "zC"), dtype=Float64)
-#    NCD.NCDataset(dsname, mode) do ds
-#        NCD.defVar(ds, varname, data, coords)
-#    end
-#end
-
-#function save_bak(dsname)
-#    Vbak = Field(model.background_fields.velocities.v + v*0)
-#    Bbak = Field(model.background_fields.tracers.b + b*0)
-#    compute!(Vbak)
-#    compute!(Bbak)
-#    write_to_ds(dsname, "V", interior(Vbak), mode="c", coords=("xC", "yF", "zC"))
-#    write_to_ds(dsname, "B", interior(Bbak), mode="a", coords=("xC", "yC", "zC"))
-#end

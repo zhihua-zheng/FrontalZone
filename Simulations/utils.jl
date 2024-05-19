@@ -17,22 +17,12 @@ using Oceananigans: prognostic_fields, HydrostaticFreeSurfaceModel
 using Oceananigans.Biogeochemistry: biogeochemical_auxiliary_fields
 
 
-#∂z_uˢ(z)    = 1 / vertical_scale * Uˢ * exp(z / vertical_scale)
-#∂z_vˢ(z)    = 1 / vertical_scale * Uˢ * exp(z / vertical_scale) / 2
-#uˢ(z)       = Uˢ * exp(z / vertical_scale)
-#vˢ(z)       = Uˢ * exp(z / vertical_scale) / 2
-#uˢ_transport(z) = vertical_scale * Uˢ * (1 - exp(z/vertical_scale))
-#vˢ_transport(z) = vertical_scale * Uˢ * (1 - exp(z/vertical_scale)) / 2
-#B̅(x) = - M² * x
-#V̅(z) = - M² / f * (z+hᵢ)
-
-
 @inline uˢ_transport(z) = pm.Dˢ * pm.Uˢ * (1 - exp(z / pm.Dˢ)) * cosd(pm.θ₀)
 @inline vˢ_transport(z) = pm.Dˢ * pm.Uˢ * (1 - exp(z / pm.Dˢ)) * sind(pm.θ₀)
 @inline uˢ(z) = pm.Uˢ * exp(z / pm.Dˢ) * cosd(pm.θ₀)
 @inline vˢ(z) = pm.Uˢ * exp(z / pm.Dˢ) * sind(pm.θ₀)
 @inline B̅(x)  = - pm.M² * x
-@inline V̅(z)  = - pm.M² / pm.f * (z + pm.hᵢ) 
+@inline V̅(z)  = - pm.M² / pm.f * (z + pm.Lz/2)
 
 @inline function get_time_invariant_fields(grid::RectilinearGrid)
     Tus = Field{Nothing, Nothing, Face}(grid)
