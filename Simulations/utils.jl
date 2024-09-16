@@ -178,6 +178,30 @@ end
     return KernelFunctionOperation{LX, LY, Nothing}(kernel_getbc, model.grid, mom_bc, model.clock, model_fields)
 end
 
+@inline function SurfaceTracerFlux(model::NonhydrostaticModel, tracer_name)
+    model_fields = fields(model)
+    tracer = model.tracers[tracer_name]
+    tra_bc = tracer.boundary_conditions.top
+    LX = location(tracer, Int32(1))
+    LY = location(tracer, Int32(2))
+    return KernelFunctionOperation{LX, LY, Nothing}(kernel_getbc, model.grid, tra_bc, model.clock, model_fields)
+end
+
+
+@inline function XSubgridscaleNormalStress(model::NonhydrostaticModel)
+    return KernelFunctionOperation{Center, Center, Center}(viscous_flux_ux, model.grid, model.closure,
+                                                           model.diffusivity_fields, model.clock, fields(model), model.buoyancy)
+end
+
+@inline function YSubgridscaleNormalStress(model::NonhydrostaticModel)
+    return KernelFunctionOperation{Center, Center, Center}(viscous_flux_vy, model.grid, model.closure,
+                                                           model.diffusivity_fields, model.clock, fields(model), model.buoyancy)
+end
+
+@inline function ZSubgridscaleNormalStress(model::NonhydrostaticModel)
+    return KernelFunctionOperation{Center, Center, Center}(viscous_flux_wz, model.grid, model.closure,
+                                                           model.diffusivity_fields, model.clock, fields(model), model.buoyancy)
+end
 
 @inline function XSubgridscaleVerticalMomentumFlux(model::NonhydrostaticModel)
     return KernelFunctionOperation{Face, Center, Face}(viscous_flux_uz, model.grid, model.closure,

@@ -9,7 +9,7 @@ using Oceanostics.TKEBudgetTerms: PressureRedistributionTerm
 
 
 fff_scratch = Field{Face, Face, Face}(grid)
-#ccc_scratch = Field{Center, Center, Center}(grid)
+ccc_scratch = Field{Center, Center, Center}(grid)
 #cnc_scratch = Field{Center, Nothing, Center}(grid)
 
 #function XYSlice(grid, z)
@@ -94,7 +94,7 @@ fff_scratch = Field{Face, Face, Face}(grid)
                                      Field(model.velocities.v - vˢ - Vg))
     w  = model.velocities.w
     b  = model.tracers.b
-    c  = model.tracers.c
+    #c  = model.tracers.c
 
     wᶠᶠᶠ = @at (Face,   Face,   Face)   w
     wᶜᶜᶜ = @at (Center, Center, Center) w
@@ -135,10 +135,13 @@ fff_scratch = Field{Face, Face, Face}(grid)
     #νₑhm = Field(Average(νₑ_ccf, dims=(1,2)))
     #κₑhm = Field(Average(κₑ_ccf, dims=(1,2)))
 
+    uusgs = Field(Average(XSubgridscaleNormalStress(model), dims=(1,2)))
+    vvsgs = Field(Average(YSubgridscaleNormalStress(model), dims=(1,2)))
+    wwsgs = Field(Average(ZSubgridscaleNormalStress(model), dims=(1,2)))
     wusgs = Field(Average(XSubgridscaleVerticalMomentumFlux(model),  dims=(1,2)))
     wvsgs = Field(Average(YSubgridscaleVerticalMomentumFlux(model),  dims=(1,2)))
     wbsgs = Field(Average(SubgridscaleVerticalTracerFlux(model, :b), dims=(1,2)))
-    wcsgs = Field(Average(SubgridscaleVerticalTracerFlux(model, :c), dims=(1,2)))
+    #wcsgs = Field(Average(SubgridscaleVerticalTracerFlux(model, :c), dims=(1,2)))
 
     # Correlations
     uh = Field(Average(uE, dims=(1,2)))
@@ -152,28 +155,28 @@ fff_scratch = Field{Face, Face, Face}(grid)
     uhᶜ = Field(Average(uᶜᶜᶜ, dims=(1,2)))
     vhᶜ = Field(Average(vᶜᶜᶜ, dims=(1,2)))
     bh  = Field(Average(b,    dims=(1,2)))
-    ch  = Field(Average(c,    dims=(1,2)))
+    #ch  = Field(Average(c,    dims=(1,2)))
     qh  = Field(Average(q,    dims=(1,2)))
     u′ᶜ = Field(uᶜᶜᶜ - uhᶜ)
     v′ᶜ = Field(vᶜᶜᶜ - vhᶜ)
     b′  = Field(b    - bh )
-    c′  = Field(c    - ch )
+    #c′  = Field(c    - ch )
     q′  = Field(q    - qh )
     uut = Field(Average(u′ᶜ  * u′ᶜ , dims=(1,2)))
     vvt = Field(Average(v′ᶜ  * v′ᶜ , dims=(1,2)))
     wwt = Field(Average(wᶜᶜᶜ * wᶜᶜᶜ, dims=(1,2)))
     bbt = Field(Average(b′   * b′  , dims=(1,2)))
-    cct = Field(Average(c′   * c′  , dims=(1,2)))
+    #cct = Field(Average(c′   * c′  , dims=(1,2)))
     wut = Field(Average(wᶜᶜᶜ * u′ᶜ , dims=(1,2)))
     wvt = Field(Average(wᶜᶜᶜ * v′ᶜ , dims=(1,2)))
     wbt = Field(Average(wᶜᶜᶜ * b′  , dims=(1,2)))
-    wct = Field(Average(wᶜᶜᶜ * c′  , dims=(1,2)))
+    #wct = Field(Average(wᶜᶜᶜ * c′  , dims=(1,2)))
     wqt = Field(Average(wᶠᶠᶠ * q′  , dims=(1,2)))
     uvt = Field(Average(u′ᶜ  * v′ᶜ , dims=(1,2)))
 
     #Tsgshm = Field(Average(SubgridscaleRedistributionTerm(model, U=uh, V=vh), dims=(1,2)))
-    
-    TKE_eps = Field(Average(KineticEnergyDissipation(model, energy_vel=pert_velocities), dims=(1,2)))
+    eps     = Field(KineticEnergyDissipation(model, energy_vel=pert_velocities), data=ccc_scratch.data)
+    TKE_eps = Field(Average(eps, dims=(1,2)))
     TKE_prs = Field(Average(PressureRedistributionTerm(model), dims=(1,2)))
     TKE_tur = Field(Average(KineticEnergyAdvection(model, velocities=pert_velocities, energy_vel=pert_velocities), dims=(1,2)))
     TKE_sgs = Field(Average(KineticEnergyStress(model, energy_vel=pert_velocities), dims=(1,2)))
@@ -192,6 +195,7 @@ fff_scratch = Field{Face, Face, Face}(grid)
     # Surface fluxes
     Qu = Field(Average(SurfaceMomentumFlux(model, :u), dims=(1,2)))
     Qv = Field(Average(SurfaceMomentumFlux(model, :v), dims=(1,2)))
+    Qb = Field(Average(SurfaceTracerFlux(model,   :b), dims=(1,2)))
 
     # Equivalence of volume averaged PV through divergence theorem
     # If use Integral, we have to wrap the vorticity and buoyancy into fields first
@@ -211,15 +215,16 @@ fff_scratch = Field{Face, Face, Face}(grid)
     #Jz_dia
 
     # Assemble outputs
-    fields_slice = Dict("u" => uᶜᶜᶜ, "v" => vᶜᶜᶜ, "w" => wᶜᶜᶜ, "b" => b, "c" => c, "q" => q)
+    fields_slice = Dict("u" => uᶜᶜᶜ, "v" => vᶜᶜᶜ, "w" => wᶜᶜᶜ, "b" => b, "q" => q, "eps" => eps)#, "c" => c)
 #                        "ufrc" => ufrc, "vfrc" => vfrc, "wfrc" => wfrc, "bdia" => bdia, "νₑ" => νₑ, "κₑ" => κₑ)
     fields_mean = Dict(
 #                       "bym" => bym, "cym" => cym, "uym" => uym, "vym" => vym, "wym" => wym,
-                       "u" => uhᶜ, "v" => vhᶜ, "b" => bh, "c" => ch, "q" => qh,
-                       "uut" => uut, "vvt" => vvt, "wwt" => wwt, "bbt" => bbt, "cct" => cct,
-                       "wut" => wut, "wvt" => wvt, "uvt" => uvt, "wbt" => wbt, "wct" => wct, "wqt" => wqt,
-                       "wusgs" => wusgs, "wvsgs" => wvsgs, "wbsgs" => wbsgs, "wcsgs" => wcsgs,
-                       "Qu" => Qu, "Qv" => Qv,
+                       "u" => uhᶜ, "v" => vhᶜ, "b" => bh, "q" => qh,# "c" => ch,
+                       "uut" => uut, "vvt" => vvt, "wwt" => wwt, "bbt" => bbt,# "cct" => cct,
+                       "wut" => wut, "wvt" => wvt, "uvt" => uvt, "wbt" => wbt, "wqt" => wqt,# "wct" => wct,
+                       "uusgs" => uusgs, "vvsgs" => vvsgs, "wwsgs" => wwsgs,
+                       "wusgs" => wusgs, "wvsgs" => wvsgs, "wbsgs" => wbsgs,# "wcsgs" => wcsgs,
+                       "Qu" => Qu, "Qv" => Qv, "Qb" => Qb,
                        "TKE_eps" => TKE_eps, "TKE_tur" => TKE_tur, "TKE_sgs" => TKE_sgs, "TKE_spg" => TKE_spg, "TKE_prs" => TKE_prs,
                        "MKE_eps" => MKE_eps, "MKE_tur" => MKE_tur, "MKE_sgs" => MKE_sgs, "MKE_spg" => MKE_spg,
                        "CKE_eps" => CKE_eps, "CKE_tur" => CKE_tur, "CKE_sgs" => CKE_sgs, "CKE_spg" => CKE_spg)

@@ -68,11 +68,12 @@ ckpdir    = replace(outdir, "Output" => "Restart") * "/" * pm.ckpdir_affix
 # Generating function
 @inline z_faces(k) = pm.Lz * (ζ₀(k) * Σ(k) - 1)
 
+zgrid = ifelse(pm.use_stretched_z, z_faces, (-pm.Lz, 0))
 grid = RectilinearGrid(GPU(),
                        size = (pm.Nx, pm.Ny, pm.Nz),
                        x = (-pm.Lx/2, pm.Lx/2),
                        y = (0, pm.Ly),
-                       z = z_faces,
+                       z = zgrid,
                        topology = (Periodic, Periodic, Bounded))
 
 
@@ -113,7 +114,7 @@ eddy_νκ_bcs = FieldBoundaryConditions()
 ###########-------- SPONGE LAYER -----------------#############
 @info "Set up bottom sponge layer...."
 # relax to initial states
-target_v = ifelse(pm.use_background_Vg, 0, LinearTarget{:z}(intercept=(-pm.M²/pm.f*pm.hᵢ),
+target_v = ifelse(pm.use_background_Vg, 0, LinearTarget{:z}(intercept=(-pm.M²/pm.f*pm.Lz/2),
                                                             gradient=(-pm.M²/pm.f)))
 target_b = LinearTarget{:z}(intercept=pm.N₁²*pm.Lz, gradient=pm.N₁²)
 #@inline heaviside(X) = ifelse(X < 0, zero(X), one(X))
@@ -145,7 +146,7 @@ fields_time_invariant = get_time_invariant_fields(grid)
 model = NonhydrostaticModel(; grid,
                             coriolis = FPlane(f=pm.f),
                             buoyancy = BuoyancyTracer(),
-                            tracers = (:b, :c),
+                            tracers = :b,# :c),
                             stokes_drift = UniformStokesDrift(∂z_uˢ=∂z_uˢ, ∂z_vˢ=∂z_vˢ, parameters=Stokes_params),
                             boundary_conditions = (b=b_bcs, u=u_bcs, v=v_bcs, w=w_bcs, νₑ=eddy_νκ_bcs, κₑ=(; b=eddy_νκ_bcs)),
                             forcing = sponge_forcing,
@@ -187,9 +188,9 @@ else
     set!(model, u=uᵢ, v=vᵢ, w=wᵢ, b=bᵢ)
 end
 
-@info "Release tracer...."
-cᵢ(x, y, z) = (1 - tanh(50*(z + pm.hᵢ) / pm.hᵢ)) / 2
-set!(model, c=cᵢ)
+#@info "Release tracer...."
+#cᵢ(x, y, z) = (1 - tanh(50*(z + pm.hᵢ) / pm.hᵢ)) / 2
+#set!(model, c=cᵢ)
 
 
 ###########-------- SIMULATION SET UP ---------------#############
@@ -201,24 +202,24 @@ set!(model, c=cᵢ)
 simulation = Simulation(model, Δt=Δt₀, stop_time=stop_time, wall_time_limit=12hours)
 
 wizard = TimeStepWizard(cfl=pm.cfl, diffusive_cfl=pm.cfl, min_change=0.05, max_change=1.5, max_Δt=pm.max_Δt)
-simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(2))
+simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(5))
 
-#wall_clock = Ref(time_ns())
-#
-#@inline function print_progress(sim)
-#    u, v, w = model.velocities
-#    progress = 100 * (time(sim) / sim.stop_time)
-#    elapsed = (time_ns() - wall_clock[]) / 1e9
-#
-#    @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, max(u): (%6.3e, %6.3e, %6.3e) m/s, next Δt: %s\n",
-#            progress, iteration(sim), prettytime(sim), prettytime(elapsed),
-#            maximum(abs, u), maximum(abs, v), maximum(abs, w), prettytime(sim.Δt))
-#
-#    wall_clock[] = time_ns()
-#    return nothing
-#end
-#
-#simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterval(200))
+wall_clock = Ref(time_ns())
+
+@inline function print_progress(sim)
+    u, v, w = model.velocities
+    progress = 100 * (time(sim) / sim.stop_time)
+    elapsed = (time_ns() - wall_clock[]) / 1e9
+
+    @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, max(u): (%6.3e, %6.3e, %6.3e) m/s, next Δt: %s\n",
+            progress, iteration(sim), prettytime(sim), prettytime(elapsed),
+            maximum(u), maximum(v), maximum(w), prettytime(sim.Δt))
+
+    wall_clock[] = time_ns()
+    return nothing
+end
+
+simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterval(500))
 
 
 ###########-------- DIAGNOSTICS --------------#############
@@ -227,8 +228,11 @@ include("diagnostics.jl")
 fields_slice, fields_mean = get_output_tuple(model, fields_time_invariant["us"], fields_time_invariant["vs"],
                                              fields_time_invariant["Vbak"], pm; extra_outputs=pm.extra_outputs)
 
-global_attributes = Dict("viscosity_mol" => pm.ν₀, "diffusivity_mol" => pm.κ₀,
-                         "Uˢ" => pm.Uˢ, "Dˢ" => pm.Dˢ, "M²" => pm.M², "f" => pm.f)
+#global_attributes = Dict("viscosity_mol" => pm.ν₀, "diffusivity_mol" => pm.κ₀,
+#                         "Uˢ" => pm.Uˢ, "Dˢ" => pm.Dˢ, "M²" => pm.M², "f" => pm.f,
+#                         "N₀²" => pm.N₀², "N₁²" => pm.N₁²)
+@inline bool2int(x) = typeof(x) == Bool ? Int(x) : x 
+global_attributes = Dict(pairs(map(bool2int, pm)))
 
 #depth = 10:10:60
 #depth_sym = (Symbol("xy", n) for n=depth)
@@ -254,7 +258,7 @@ end
 ow = simulation.output_writers[:averages] = NetCDFOutputWriter(model, fields_mean;
                                                        filename = casename * "_averages.nc",
                                                        dir = outdir,
-                                                       schedule = TimeInterval(pm.out_interval_mean),
+                                                       schedule = AveragedTimeInterval(pm.out_interval_mean),#TimeInterval(pm.out_interval_mean),
                                                        global_attributes = global_attributes,
                                                        overwrite_existing = true)
 
