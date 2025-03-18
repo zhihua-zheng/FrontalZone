@@ -10,7 +10,9 @@ using Oceanostics.TKEBudgetTerms: PressureRedistributionTerm
 
 fff_scratch = Field{Face, Face, Face}(grid)
 ccc_scratch = Field{Center, Center, Center}(grid)
-#cnc_scratch = Field{Center, Nothing, Center}(grid)
+#fcf_scratch = Field{Face, Center, Face}(grid)
+#cff_scratch = Field{Center, Face, Face}(grid)
+#ccf_scratch = Field{Center, Center, Face}(grid)
 
 #function XYSlice(grid, z)
 #    i = Colon()
@@ -135,12 +137,13 @@ ccc_scratch = Field{Center, Center, Center}(grid)
     #νₑhm = Field(Average(νₑ_ccf, dims=(1,2)))
     #κₑhm = Field(Average(κₑ_ccf, dims=(1,2)))
 
-    uusgs = Field(Average(XSubgridscaleNormalStress(model), dims=(1,2)))
-    vvsgs = Field(Average(YSubgridscaleNormalStress(model), dims=(1,2)))
-    wwsgs = Field(Average(ZSubgridscaleNormalStress(model), dims=(1,2)))
-    wusgs = Field(Average(XSubgridscaleVerticalMomentumFlux(model),  dims=(1,2)))
-    wvsgs = Field(Average(YSubgridscaleVerticalMomentumFlux(model),  dims=(1,2)))
-    wbsgs = Field(Average(SubgridscaleVerticalTracerFlux(model, :b), dims=(1,2)))
+    #wusgs = Field(XSubgridscaleVerticalMomentumFlux(model),  data=fcf_scratch.data)
+    #wvsgs = Field(YSubgridscaleVerticalMomentumFlux(model),  data=cff_scratch.data)
+    #wbsgs = Field(SubgridscaleVerticalTracerFlux(model, :b), data=ccf_scratch.data)
+
+    wusgs_hm = Field(Average(XSubgridscaleVerticalMomentumFlux(model),  dims=(1,2)))
+    wvsgs_hm = Field(Average(YSubgridscaleVerticalMomentumFlux(model),  dims=(1,2)))
+    wbsgs_hm = Field(Average(SubgridscaleVerticalTracerFlux(model, :b), dims=(1,2)))
     #wcsgs = Field(Average(SubgridscaleVerticalTracerFlux(model, :c), dims=(1,2)))
 
     # Correlations
@@ -175,8 +178,12 @@ ccc_scratch = Field{Center, Center, Center}(grid)
     uvt = Field(Average(u′ᶜ  * v′ᶜ , dims=(1,2)))
 
     #Tsgshm = Field(Average(SubgridscaleRedistributionTerm(model, U=uh, V=vh), dims=(1,2)))
-    eps     = Field(KineticEnergyDissipation(model, energy_vel=pert_velocities), data=ccc_scratch.data)
-    TKE_eps = Field(Average(eps, dims=(1,2)))
+    eps  = Field(KineticEnergyDissipation(model, energy_vel=pert_velocities), data=ccc_scratch.data)
+    #Tprs = Field(PressureRedistributionTerm(model), data=ccc_scratch.data)
+    #Ttur = Field(KineticEnergyAdvection(model, velocities=pert_velocities, energy_vel=pert_velocities), data=ccc_scratch.data)
+    #Tsgs = Field(KineticEnergyStress(model, energy_vel=pert_velocities), data=ccc_scratch.data)
+
+    TKE_eps = Field(Average(eps,  dims=(1,2)))
     TKE_prs = Field(Average(PressureRedistributionTerm(model), dims=(1,2)))
     TKE_tur = Field(Average(KineticEnergyAdvection(model, velocities=pert_velocities, energy_vel=pert_velocities), dims=(1,2)))
     TKE_sgs = Field(Average(KineticEnergyStress(model, energy_vel=pert_velocities), dims=(1,2)))
@@ -215,15 +222,13 @@ ccc_scratch = Field{Center, Center, Center}(grid)
     #Jz_dia
 
     # Assemble outputs
-    fields_slice = Dict("u" => uᶜᶜᶜ, "v" => vᶜᶜᶜ, "w" => wᶜᶜᶜ, "b" => b, "q" => q, "eps" => eps)#, "c" => c)
-#                        "ufrc" => ufrc, "vfrc" => vfrc, "wfrc" => wfrc, "bdia" => bdia, "νₑ" => νₑ, "κₑ" => κₑ)
+    fields_slice = Dict("u" => uᶜᶜᶜ, "v" => vᶜᶜᶜ, "w" => wᶜᶜᶜ, "b" => b, "q" => q, "eps" => eps)#, "c" => c)s
     fields_mean = Dict(
 #                       "bym" => bym, "cym" => cym, "uym" => uym, "vym" => vym, "wym" => wym,
                        "u" => uhᶜ, "v" => vhᶜ, "b" => bh, "q" => qh,# "c" => ch,
                        "uut" => uut, "vvt" => vvt, "wwt" => wwt, "bbt" => bbt,# "cct" => cct,
                        "wut" => wut, "wvt" => wvt, "uvt" => uvt, "wbt" => wbt, "wqt" => wqt,# "wct" => wct,
-                       "uusgs" => uusgs, "vvsgs" => vvsgs, "wwsgs" => wwsgs,
-                       "wusgs" => wusgs, "wvsgs" => wvsgs, "wbsgs" => wbsgs,# "wcsgs" => wcsgs,
+                       "wusgs" => wusgs_hm, "wvsgs" => wvsgs_hm, "wbsgs" => wbsgs_hm,# "wcsgs" => wcsgs,
                        "Qu" => Qu, "Qv" => Qv, "Qb" => Qb,
                        "TKE_eps" => TKE_eps, "TKE_tur" => TKE_tur, "TKE_sgs" => TKE_sgs, "TKE_spg" => TKE_spg, "TKE_prs" => TKE_prs,
                        "MKE_eps" => MKE_eps, "MKE_tur" => MKE_tur, "MKE_sgs" => MKE_sgs, "MKE_spg" => MKE_spg,

@@ -51,7 +51,7 @@ pm = getproperty(SimParams(), Symbol(groupname))
 pm = enrich_parameters(pm, casename)
 
 stop_time = ifelse(args["nTf"] == nothing, pm.nTf, args["nTf"])*pm.Tf
-ckpdir    = replace(outdir, "Output" => "Restart") * "/" * pm.ckpdir_affix
+ckpdir    = replace(outdir, "Output" => "Restart") * "/" * pm.ckpdir_affix * "/" * casename
 
 
 ###########-------- GRID SET UP ----------------#############
@@ -199,7 +199,7 @@ end
 Δy  = minimum_yspacing(grid, Center(), Center(), Center())
 Δz  = minimum_zspacing(grid, Center(), Center(), Center())
 Δt₀ = pm.cfl * min(Δx, Δy, Δz) / max(pm.Vg, 0.02)
-simulation = Simulation(model, Δt=Δt₀, stop_time=stop_time, wall_time_limit=12hours)
+simulation = Simulation(model, Δt=2seconds, stop_time=stop_time, wall_time_limit=12hours)
 
 wizard = TimeStepWizard(cfl=pm.cfl, diffusive_cfl=pm.cfl, min_change=0.05, max_change=1.5, max_Δt=pm.max_Δt)
 simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(5))
@@ -228,9 +228,6 @@ include("diagnostics.jl")
 fields_slice, fields_mean = get_output_tuple(model, fields_time_invariant["us"], fields_time_invariant["vs"],
                                              fields_time_invariant["Vbak"], pm; extra_outputs=pm.extra_outputs)
 
-#global_attributes = Dict("viscosity_mol" => pm.ν₀, "diffusivity_mol" => pm.κ₀,
-#                         "Uˢ" => pm.Uˢ, "Dˢ" => pm.Dˢ, "M²" => pm.M², "f" => pm.f,
-#                         "N₀²" => pm.N₀², "N₁²" => pm.N₁²)
 @inline bool2int(x) = typeof(x) == Bool ? Int(x) : x 
 global_attributes = Dict(pairs(map(bool2int, pm)))
 
@@ -251,25 +248,27 @@ for side in keys(slicers)
                                                        dir = outdir,
                                                        schedule = TimeInterval(pm.out_interval_slice),
                                                        global_attributes = global_attributes,
-                                                       overwrite_existing = true,
+                                                       overwrite_existing = pm.overwrite_outputs,
                                                        indices)
 end
 
 ow = simulation.output_writers[:averages] = NetCDFOutputWriter(model, fields_mean;
                                                        filename = casename * "_averages.nc",
                                                        dir = outdir,
-                                                       schedule = AveragedTimeInterval(pm.out_interval_mean),#TimeInterval(pm.out_interval_mean),
+                                                       schedule = TimeInterval(pm.out_interval_mean),#AveragedTimeInterval(pm.out_interval_mean),
                                                        global_attributes = global_attributes,
-                                                       overwrite_existing = true)
+                                                       overwrite_existing = pm.overwrite_outputs)
 
-write_time_invariant_fields!(model, ow, fields_time_invariant)
+if pm.overwrite_outputs
+    write_time_invariant_fields!(model, ow, fields_time_invariant)
+end
 
 
 ###########-------- CHECKPOINTER --------------#############
 if pm.save_checkpoint
     @info "Add checkpointer..."
-    ispath(ckpdir) && rm(ckpdir, recursive=true, force=true) 
-    mkdir(ckpdir)
+    #ispath(ckpdir) && rm(ckpdir, recursive=true, force=true) 
+    ispath(ckpdir) || mkdir(ckpdir)
     simulation.output_writers[:checkpointer] = Checkpointer(model, schedule=TimeInterval(pm.ckp_interval),
                                                             dir=ckpdir, prefix="checkpoint")
 end
@@ -278,5 +277,5 @@ end
 ###########-------- RUN! --------------#############
 run(`nvidia-smi`) # check how much memory used on a GPU run
 @info "Run...."
-run!(simulation)
+run!(simulation, pickup=true)
 @info "Simulation completed in " * prettytime(simulation.run_wall_time)

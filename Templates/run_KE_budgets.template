@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#PBS -A UMCP0020
+#PBS -A UMCP0036
 #PBS -N run_{0}_KE_budgets
 #PBS -o Logs/run_{0}_KE_budgets.log
 #PBS -j oe

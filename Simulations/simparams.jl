@@ -2,7 +2,7 @@ using Parameters
 
 @with_kw struct SimParams
     commons = (;
-               Lz = 126meters, # depth
+               Lz = 100meters, # depth
                f  = 1e-4,   # [s⁻¹] Coriolis frequency
                hᵢ = 60,     # [m] initial mixed layer depth
                ρₐ = 1.225,  # [kg m⁻³] average density of air at the surface
@@ -17,8 +17,8 @@ using Parameters
                #N₁² = 3.24e-5, # [s⁻²] thermocline buoyancy frequency squared
 
                noise = 1e-3, # initial noise amplitude
-               out_interval_slice = 10minutes, # how often to save slice
-               out_interval_mean  = 2minutes, # how often to save mean
+               out_interval_slice = 5minutes, # how often to save slice
+               out_interval_mean  = 5minutes, # how often to save mean
 
                z_refinement = 2.3,  # controls spacing near surface (higher means finer spaced)
                z_stretching = 5,  # controls rate of stretching at bottom
@@ -29,16 +29,31 @@ using Parameters
                use_background_Vg  = true,
                use_stretched_z    = false,
                extra_outputs      = false,
-               save_checkpoint    = false,
+               overwrite_outputs  = false,
+               save_checkpoint    = true,
                full_fields        = true,
               )
+
+    Front = (; commons...,
+               Lx = 1kilometers,
+               Ly = 1kilometers,
+               Nx_full = 512,
+               Ny_full = 512,
+               Nz_full = 256,
+               nTf = 3,
+               cfl = 0.95,
+               max_Δt = 0.5minutes,
+               start_from_restratified = false,
+               pickup_checkpoint = false,
+               ckpdir_affix = "Front",
+               )
 
     ShortFront = (; commons...,
                Lx = 1kilometers,
                Ly = 250meters,
-               Nx_full = 512,
-               Ny_full = 128,
-               Nz_full = 256,
+               Nx_full = 800,
+               Ny_full = 200,
+               Nz_full = 320,
                nTf = 3,
                cfl = 0.95,
                max_Δt = 0.5minutes,
@@ -88,7 +103,7 @@ end
 
 function enrich_parameters(params, casename)
     case_type, coarsen_h, coarsen_z, Gb, Q₀, τ₀, θ₀, wind_oscillation, use_Stokes = decode_casename(casename)
-    sponge_σ   = round(√((params.Lz/7)^2 / 6 / 2), sigdigits=3) # [m] sponge layer Gaussian mask width (thickness: Lz/7, tapering to e⁻⁶)
+    sponge_σ   = round(√((params.Lz/5)^2 / 6 / 2), sigdigits=3) # [m] sponge layer Gaussian mask width (thickness: Lz/5, tapering to e⁻⁶)
     σ_wind     = ifelse(wind_oscillation, params.f, 0)
     wind_waves = ifelse((τ₀==0) & use_Stokes, false, true)
 
@@ -103,7 +118,7 @@ function enrich_parameters(params, casename)
     Tf   = 2π/params.f   # [s] inertial period
     t₀   = ifelse(params.pickup_checkpoint, 6*Tf, 0*Tf) # [s] when to introduce wind stress
     tᵣ   = √2*Tf # [s] length of the linear ramp of wind forcing
-    ckp_interval = 1*Tf # [s] how often to checkpoint
+    ckp_interval = 0.2*Tf # [s] how often to checkpoint
     ∂v∂z_cgeo    = ifelse(params.counter_geo_stress, M²/params.f, 0) # vertical gradient of along-front velocity at top/bottom
 
     Nx = params.Nx_full ÷ coarsen_h

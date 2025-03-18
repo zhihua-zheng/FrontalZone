@@ -6,9 +6,12 @@ import time
 import warnings
 import argparse
 import numpy as np
+import pandas as pd
 import xarray as xr
 from xgcm import Grid
 from scipy import interpolate
+from dask.distributed import Client
+from dask_jobqueue import PBSCluster
 
 
 def bld_from_Rib(Rib, d, Ribc=0.3):
@@ -54,7 +57,7 @@ def get_Rib_bld(ds, Ribc=0.3):
     Rib_array = xr.full_like(ds.b,      fill_value=np.nan).assign_attrs(units='',  long_name='Bulk Richardson number')
     d  = np.abs(ds.zC).data
     dz = np.diff(ds.zF)
-    Vbak = ds.Vbak.data
+    Vbak = ds.Vbak.isel(time=0).data
     for i in range(ds.sizes['time']):
         b = ds.b.isel(time=i).data
         u = ds.u.isel(time=i).data
@@ -83,46 +86,59 @@ def get_Rib_bld(ds, Ribc=0.3):
 
 
 def get_mld_ufunc(b, z, criteria=5.4e-6):
-    f = interpolate.interp1d(b, z, assume_sorted=False)
-    if criteria == '5-percent':
-        rtau = 0.05
-        delb = b - rtau
-        if np.all(delb >= 0) or np.all(np.isnan(b)) or (delb[-1] <= 0):
+    if isinstance(criteria, str) and criteria.startswith('max_over'):
+        threshold = float(criteria.split('_')[-1])
+        idx_mld = arg_local_max_last(b, threshold=threshold)#np.argmax(b)
+        mld = -z[idx_mld]
+    else:
+        if criteria == '5-percent':
+            rtau = 0.05
+            delb = b - rtau
+        elif criteria == 'critical':
+            delb = b - 1e-8
+        elif criteria == 0:
+            delb = b - 0
+        else:
+            delb = b - (b[-1] - criteria)
+
+        if np.all(delb >= 0) or (delb[-1] <= 0) or np.all(np.isnan(b)):
             mld = np.nan
         else:
             last_idx = np.max(np.where(delb <= 0))
             crossing = range(last_idx, (last_idx + 2))
-            f = interpolate.interp1d(b[crossing], z[crossing], assume_sorted=True)
-            mld = -f(rtau)
-    elif criteria == 'critical':
-        if max(b) < 1e-8:
-            mld = -z[-1]
-        else:
-            mld = -f(1e-8)
-    elif criteria == 'max':
-        idx_mld = np.argmax(b)
-        mld = -z[idx_mld]
-    else:
-        mld = -f(b[-1] - criteria)
+            f = interpolate.interp1d(delb[crossing], z[crossing], assume_sorted=True)
+            mld = -f(0)
     return mld
 
 
 def get_mld(ds, cvar='b', dims=['zC']):
     a = ds[cvar]
     if cvar == 'b':
-        criteria = 0.001/ds.attrs['ρ₀']*9.81 #ds.attrs['N₀²'] * ds.attrs['hᵢ']
+        criteria = 0.03/ds.attrs['ρ₀']*9.81 #ds.attrs['N₀²'] * ds.attrs['hᵢ']
     elif cvar == 'dbdz':
-        criteria = 'max'
+        N2_base = ds.attrs['N₁²']
+        criteria = f'max_over_{N2_base}'
     elif cvar == 'wuvn':
         criteria = '5-percent'
-    elif cvar == 'TKE_eps':
+    elif cvar == 'TKE_eps' or cvar == 'eps':
         criteria = 'critical'
+    elif cvar == 'wb':
+        criteria = 0
     return xr.apply_ufunc(get_mld_ufunc, a, ds.zC,
                           input_core_dims=[dims, dims],
                           output_core_dims=[[]],
                           output_dtypes=[float],
-                          kwargs=dict(criteria = criteria),
+                          kwargs=dict(criteria=criteria),
+                          dask='parallelized',
                           vectorize=True)
+
+
+def arg_local_max_last(y, threshold):
+    """
+    https://gist.github.com/ben741/d8c70b608d96d9f7ed231086b237ba6b
+    """
+    idx_peaks = np.where((y[1:-1] > y[0:-2]) * (y[1:-1] > y[2:]) * (y[1:-1] > threshold))[0] + 1
+    return idx_peaks[-1]
 
 
 def main():
@@ -154,14 +170,16 @@ def main():
         print('OS not supported.')
 
     # read data
-    dsa = xr.open_dataset(data_dir+args.cname+'_averages.nc').isel(time=slice(1,None))#.drop_vars(['uym','vym','wym','bym','cym'])
-    dsa.close()
+    dsf = xr.open_dataset(data_dir+args.cname+'_full.nc').drop_vars(['u', 'v', 'w', 'q'])\
+            .chunk({'xC':200, 'yC':200, 'time':1})
+    dsf.close()
+    dsf = dsf.where(((dsf.time / np.timedelta64(int(dsf.out_interval_slice), 's')) % 1) == 0, drop=True)
+    dsf = dsf.drop_duplicates(dim='time', keep='last')
 
-    # fix initial mean buoyancy profile (only problematic for time averaged outputs)
-    if dsa.b.isel(time=0).mean() == 0:
-        b_ini = dsa.attrs['N₁²']*(dsa.zC + dsa.Lz) + \
-               (dsa.attrs['N₀²'] - dsa.attrs['N₁²'])*np.maximum(dsa.zC + dsa.attrs['hᵢ'], 0)
-        dsa['b'] = dsa.b.where(dsa.time != dsa.time[0], b_ini)
+    dsa = xr.open_dataset(data_dir+args.cname+'_averages.nc')
+    dsa.close()
+    dsa = dsa.where(((dsa.time / np.timedelta64(int(dsa.out_interval_mean), 's')) % 1) == 0, drop=True).transpose('time',...)
+    dsa = dsa.drop_duplicates(dim='time', keep='last')
 
     # construct coordinates
     periodic_coords = {dim : dict(left=f'{dim}F', center=f'{dim}C') for dim in 'z'}
@@ -186,10 +204,12 @@ def main():
         dsa['dwudz'] = grid.diff((wut_f + dsa.wusgs), axis='z') / dzF
         dsa['dwvdz'] = grid.diff((wvt_f + dsa.wvsgs), axis='z') / dzF
         dsa['dwbdz'] = grid.diff((wbt_f + dsa.wbsgs), axis='z') / dzF
+        b3f = grid.interp(dsf.b,    axis='z', boundary='extend').transpose(...,'zF')
         b_f = grid.interp(dsa.b,    axis='z', boundary='extend')
         u_f = grid.interp(dsa.u,    axis='z', boundary='extend')
         v_f = grid.interp(dsa.v,    axis='z', boundary='extend')
         Vgf = grid.interp(dsa.Vbak, axis='z', boundary='extend')
+        dsf['dbdz'] = grid.diff(b3f, axis='z') / dzF
         dsa['dbdz'] = grid.diff(b_f, axis='z') / dzF
         dsa['dudz'] = grid.diff(u_f, axis='z') / dzF
         dsa['dvdz'] = grid.diff(v_f, axis='z') / dzF
@@ -225,6 +245,8 @@ def main():
     dsa['wuv']    = np.sqrt(dsa.wu**2 + dsa.wv**2)
     dsa['wuvn']   = dsa.wuv / dsa.ustar2
     dsa['EBF']    = dsa.Qv * dsa.attrs['M²'] / dsa.f
+    dsa['GSP_ful'] = -dsa.wv * dsa.dVdz
+    dsa['ASP_ful'] = -dsa.wv * dsa.dvdz -dsa.wu * dsa.dudz
 
     # fix Ertel PV at the surface, where the model thinks dVdz = 0
     qsurf = dsa.q.isel(zF=-1)
@@ -235,16 +257,44 @@ def main():
     dsa['dbdz']   = dsa.dbdz.where(dsa.zC != dsa.zC[0], dsa.attrs['N₁²'])
     dsa['timeTf'] = dsa.time/np.timedelta64(int(np.around(2*np.pi/dsa.f)), 's')
     dsa['Rib'], dsa['hRib'] = get_Rib_bld(dsa)
-    #dsa['mld']    = get_mld(dsa)
-    dsa['bld']    = get_mld(dsa, cvar='TKE_eps')
-    dsa['hNsq']   = get_mld(dsa, cvar='dbdz')
-    dsa['htau']   = get_mld(dsa, cvar='wuvn')
-    dsa['htau']   = dsa.htau.where(dsa.timeTf > 0.05)
+    dsa['heps'] = get_mld(dsa, cvar='TKE_eps')
+    dsa['bld']  = get_mld(dsa, cvar='dbdz')#.rolling(time=15, center=True, min_periods=1).median()
+    dsa['mld']  = get_mld(dsa, cvar='b')#.rolling(time=15, center=True, min_periods=1).median()
+    dsa['htau'] = get_mld(dsa, cvar='wuvn')
+    dsa['htau'] = dsa.htau.where(dsa.timeTf > 0.05)
+
+    USER = os.getenv('USER')
+    TMPDIR = f'/glade/derecho/scratch/{USER}/temp'
+    job_script_prologue = [f'export TMPDIR={TMPDIR}', 'mkdir -p $TMPDIR']
+    cluster_kw = dict(job_name=args.cname+'_hm',
+                      cores=1,
+                      memory='4GiB',
+                      processes=1,
+                      local_directory=f'{TMPDIR}/pbs.$PBS_JOBID/dask/spill',
+                      log_directory=f'{TMPDIR}/pbs.$PBS_JOBID/dask/worker_logs',
+                      job_extra_directives=['-j oe', '-A UMCP0036'],
+                      job_script_prologue=job_script_prologue,
+                      resource_spec='select=1:ncpus=1:mem=4GB',
+                      queue='casper',
+                      walltime='30:00',
+                      interface='ext')
+    with PBSCluster(**cluster_kw) as cluster, Client(cluster) as client:
+        cluster.scale(32)
+        #dsa['bld'] = get_mld(dsf, cvar='dbdz').mean(['xC','yC']).compute()
+        #dsa['mld'] = get_mld(dsf, cvar='b').mean(['xC','yC']).compute()
+        dsft = dsf[['eps', 'dbdz']].where(dsf.eps >= 1e-10)
+        meps = dsft.eps.mean(['xC','yC']).compute()
+        mNsq = dsft.dbdz.mean(['xC','yC']).compute()
+
+    dsa['LOz'] = 2*np.pi*np.sqrt(meps / mNsq**(3/2)) 
     dsa['sigmaC'] = dsa.zC / dsa.bld
 
     # integrate GSP and dissipation within the boundary layer
     dsa['iGSP'] = (dsa.GSP.where(dsa.sigmaC >= -1)*dzF).sum('zC')
+    dsa['iASP'] = (dsa.ASP.where(dsa.sigmaC >= -1)*dzF).sum('zC')
     dsa['iEPS'] = (dsa.TKE_eps.where(dsa.sigmaC >= -1)*dzF).sum('zC')
+    dsa['iGSP_ful'] = (dsa.GSP_ful.where(dsa.sigmaC >= -1)*dzF).sum('zC')
+    dsa['iASP_ful'] = (dsa.ASP_ful.where(dsa.sigmaC >= -1)*dzF).sum('zC')
 
     # average statistics in the last inertial period
     dsa = dsa.assign_coords(sC=('sC', np.arange(-1.3, 0, 0.01)))
@@ -266,6 +316,11 @@ def main():
     dsa['wbt_sc'] = xr.apply_ufunc(np.interp, dsa.sC, dsali.sigmaC, dsali.wbt, **apuf_kwargs).mean('time')
     dsa['wut_sc'] = xr.apply_ufunc(np.interp, dsa.sC, dsali.sigmaC, dsali.wut, **apuf_kwargs).mean('time')
     dsa['wvt_sc'] = xr.apply_ufunc(np.interp, dsa.sC, dsali.sigmaC, dsali.wvt, **apuf_kwargs).mean('time')
+    dsa['wb_sc'] = xr.apply_ufunc(np.interp, dsa.sC, dsali.sigmaC, dsali.wb, **apuf_kwargs).mean('time')
+    dsa['wu_sc'] = xr.apply_ufunc(np.interp, dsa.sC, dsali.sigmaC, dsali.wu, **apuf_kwargs).mean('time')
+    dsa['wv_sc'] = xr.apply_ufunc(np.interp, dsa.sC, dsali.sigmaC, dsali.wv, **apuf_kwargs).mean('time')
+    dsa['GSP_ful_sc'] = xr.apply_ufunc(np.interp, dsa.sC, dsali.sigmaC, dsali.GSP_ful, **apuf_kwargs).mean('time')
+    dsa['ASP_ful_sc'] = xr.apply_ufunc(np.interp, dsa.sC, dsali.sigmaC, dsali.ASP_ful, **apuf_kwargs).mean('time')
     dsa['TKE_tur_sc'] = xr.apply_ufunc(np.interp, dsa.sC, dsali.sigmaC, dsali.TKE_tur, **apuf_kwargs).mean('time')
     dsa['TKE_prs_sc'] = xr.apply_ufunc(np.interp, dsa.sC, dsali.sigmaC, dsali.TKE_prs, **apuf_kwargs).mean('time')
     dsa['TKE_vis_sc'] = xr.apply_ufunc(np.interp, dsa.sC, dsali.sigmaC, dsali.TKE_vis, **apuf_kwargs).mean('time')
@@ -273,6 +328,7 @@ def main():
 
     fpath = data_dir+args.cname+'_KE_budgets.nc'
     dsa.to_netcdf(fpath)
+
     t1 = time.time()
     print(f'Computation finished in {((t1-t0)/60):.1f} minutes')
 

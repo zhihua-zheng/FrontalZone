@@ -1,11 +1,11 @@
 #!/bin/bash -l
-#PBS -A UMCP0020
+#PBS -A UMCP0036
 #PBS -N run_{0}
 #PBS -o Logs/run_{0}.log
 #PBS -j oe
 #PBS -l walltime=20:00:00
 #PBS -q casper
-#PBS -l select=1:ncpus=1:ngpus=1:mem=8GB
+#PBS -l select=1:ncpus=1:ngpus=1:mem=15GB
 #PBS -l gpu_type=v100
 #PBS -M zhihua@umd.edu
 #PBS -m abe
